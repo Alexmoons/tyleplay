@@ -61,6 +61,14 @@ TylePlay is a desktop application for tracking gaming sessions.
     <td align="center"><img src="./src/screenshots/tp12.png" alt="Stats 5"  /></td>
     <td align="center"><img src="./src/screenshots/tp13.png" alt="Stats 6" /></td>
   </tr>
+
+  <tr>
+    <th colspan="2" align="center">Stats</th>
+  </tr>
+  <tr>
+    <td align="center"><img src="./src/screenshots/tp14.png" alt="Stats 7"  /></td>
+    <td align="center"><img src="./src/screenshots/tp15.png" alt="Stats 8" /></td>
+  </tr>
 </table>
 
 ---
