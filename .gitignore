@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# Environment Variables
+.env
+.env.*
+!.env.example
+
+# Build Output
+Build_Exe_List/
+dist/
+src-tauri/target/
+src-tauri/gen/
+
+# Logs & Debug
+*.log
+app_stderr.txt
+app_stdout.txt
+new.txt
+
+# Temporary Files
+tmp_*
+
+# IDE & Tooling
+.vscode/
+.agents/
+
+# Temporary Screenshots
+runtime_app_window.png
+runtime_capture.png
+stub_render.png
+
+# Documentation & Internal Notes
+CHANGELOG.md
+plan.md
+
+# ./src Specific Ignores
+src/*.xlsx
+src/legacy/
+
+# ./src-tauri Specific Ignores
+src-tauri/* - Copy.*
+src-tauri/backup-*.json

@@ -1,0 +1,424 @@
+import React, { useEffect, useRef, useState } from "react";
+import {
+  buildPosterPresentationStyle,
+  formatDurationLong,
+  getInitials,
+  resolveBackdropMedia,
+  resolveCoverMedia,
+  resolveGenericMedia,
+  resolveSteamLibraryHeaderMediaCandidates,
+} from "../lib/game-helpers";
+import { MoreIcon, PencilIcon, PlayIcon, StarIcon, TrashIcon } from "./icons";
+
+export default function LibraryGameCard({
+  game,
+  viewMode = "poster",
+  steamHeaderUrl = "",
+  onOpen,
+  onEdit,
+  onDelete,
+  onToggleFavorite,
+}) {
+  const media = resolveCoverMedia(game.cover_url) || resolveBackdropMedia(game.backdrop_url);
+  const posterStyle = buildPosterPresentationStyle(game.cover_position_x, game.cover_position_y, game.cover_zoom);
+  const storeBadgeLabel = formatStoreBadgeLabel(game.store);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    function handlePointerDown(event) {
+      if (!rootRef.current?.contains(event.target)) {
+        setIsMenuOpen(false);
+      }
+    }
+
+    function handleEscape(event) {
+      if (event.key === "Escape") {
+        setIsMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, []);
+
+  const isFavorite = Boolean(game?.isFavorite ?? game?.is_favorite);
+
+  if (viewMode === "list") {
+    return (
+      <RowLibraryGameCard
+        game={game}
+        steamHeaderUrl={steamHeaderUrl}
+        storeBadgeLabel={storeBadgeLabel}
+        isMenuOpen={isMenuOpen}
+        onOpen={onOpen}
+        onEdit={onEdit}
+        onDelete={onDelete}
+        onToggleFavorite={onToggleFavorite}
+        rootRef={rootRef}
+        setIsMenuOpen={setIsMenuOpen}
+      />
+    );
+  }
+
+  return (
+    <article ref={rootRef} className="relative group w-full bg-[#141414] rounded-xl overflow-hidden border-0 transition-all duration-300">
+      <div className="relative aspect-[2/3] overflow-hidden bg-[#1e1e1e] cursor-pointer"
+        role="button"
+        tabIndex={0}
+        aria-label={`Open ${game.name} details`}
+        onClick={onOpen}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onOpen?.();
+          }
+        }}
+      >
+        {media ? (
+          <img 
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
+            src={media} 
+            alt={game.name} 
+            style={posterStyle} 
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-3xl font-black text-white/20 uppercase tracking-tighter">
+            {getInitials(game.name)}
+          </div>
+        )}
+        
+        {/* Overlay Gradients */}
+        <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black/95 via-black/70 to-transparent opacity-100 pointer-events-none transition-opacity duration-300" />
+        
+        {/* Top Badges */}
+        <div className="absolute top-2 w-full px-2 flex justify-between items-start z-10">
+          {storeBadgeLabel ? (
+            <span className="bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-1.5 py-0.5 rounded border border-white/10 shadow-sm">
+              {storeBadgeLabel}
+            </span>
+          ) : (
+            <div />
+          )}
+          <button
+            type="button"
+            className={`p-1.5 rounded-full backdrop-blur-md border border-white/10 transition-all cursor-pointer ${
+              isFavorite 
+                ? "bg-[#7068ff]/90 text-white" 
+                : "bg-black/40 text-white/70 hover:bg-black/70 hover:text-white"
+            }`}
+            onClick={(event) => {
+              event.stopPropagation();
+              event.preventDefault();
+              onToggleFavorite?.(!isFavorite);
+            }}
+          >
+            <StarIcon className={`w-3.5 h-3.5 ${isFavorite ? "fill-amber-400 text-amber-400" : ""}`} />
+          </button>
+        </div>
+        
+        {/* Bottom Content within Image */}
+        <div className="absolute bottom-0 w-full px-3.5 pt-3 pb-3.5 transform translate-y-0.5 group-hover:translate-y-0 transition-transform duration-300">
+          <h3 className="font-bold text-sm text-white leading-tight mb-0.5 line-clamp-2 drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]">
+            {game.name}
+          </h3>
+          <div className="flex items-center justify-between min-h-[18px]">
+            <span className="flex items-center gap-1.5 text-[12.5px] font-semibold text-[#c3d7d2] leading-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]">
+              <PlayIcon className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400 shrink-0" />
+              <span>{formatDurationLong(game.total_seconds || 0)}</span>
+            </span>
+            <button
+              type="button"
+              className="p-0.5 text-[#c3d7d2] hover:text-white transition-colors drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]"
+              onClick={(event) => {
+                event.stopPropagation();
+                event.preventDefault();
+                setIsMenuOpen((current) => !current);
+              }}
+            >
+              <MoreIcon className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {isMenuOpen && (
+        <div 
+          className="game-card-menu right-2 bottom-12 animate-fade-in"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="game-card-menu-item"
+            onClick={(event) => {
+              event.stopPropagation();
+              setIsMenuOpen(false);
+              onEdit?.();
+            }}
+          >
+            <PencilIcon />
+            <span>Edit Info</span>
+          </button>
+          <button
+            type="button"
+            className="game-card-menu-item is-danger"
+            onClick={async (event) => {
+              event.stopPropagation();
+              setIsMenuOpen(false);
+              await onDelete?.();
+            }}
+          >
+            <TrashIcon />
+            <span>Delete Game</span>
+          </button>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function RowLibraryGameCard({
+  game,
+  steamHeaderUrl = "",
+  storeBadgeLabel,
+  isMenuOpen,
+  onOpen,
+  onEdit,
+  onDelete,
+  onToggleFavorite,
+  rootRef,
+  setIsMenuOpen,
+}) {
+  const mediaCandidates = buildRowMediaCandidates(game, steamHeaderUrl);
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const currentMedia = mediaCandidates[sourceIndex] || "";
+  const lastPlayed = formatLastPlayed(game.finished_last_played || game.last_played);
+
+  useEffect(() => {
+    setSourceIndex(0);
+  }, [game.id, mediaCandidates.join("|")]);
+
+  const isFavorite = Boolean(game?.isFavorite ?? game?.is_favorite);
+
+  return (
+    <article
+      ref={rootRef}
+      className={`game-card game-card-list${isMenuOpen ? " is-menu-open" : ""}`}
+    >
+      <div
+        className="game-card-hitarea game-card-hitarea-list cursor-pointer"
+        role="button"
+        tabIndex={0}
+        aria-label={`Open ${game.name} details`}
+        onClick={onOpen}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onOpen?.();
+          }
+        }}
+      >
+        <div className="game-row-media">
+          {currentMedia ? (
+            <img
+              className="game-row-poster"
+              src={currentMedia}
+              alt={game.name}
+              loading="lazy"
+              onError={() => {
+                setSourceIndex((current) => (current < mediaCandidates.length ? current + 1 : current));
+              }}
+            />
+          ) : (
+            <div className="game-row-poster game-row-poster-fallback">{getInitials(game.name)}</div>
+          )}
+          {storeBadgeLabel ? <span className="game-store-badge game-store-badge-list">{storeBadgeLabel}</span> : null}
+        </div>
+
+        <div className="game-row-body">
+          <div className="game-row-head">
+            <h3>{game.name}</h3>
+            <div className="game-row-actions">
+              <button
+                type="button"
+                className={`game-favorite game-favorite-list${isFavorite ? " is-active" : ""}`}
+                aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+                aria-pressed={isFavorite}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  event.preventDefault();
+                  onToggleFavorite?.(!isFavorite);
+                }}
+              >
+                <StarIcon className={isFavorite ? "fill-amber-400 text-amber-400" : ""} />
+              </button>
+              <button
+                type="button"
+                className="game-more game-more-list"
+                aria-label={`More actions for ${game.name}`}
+                aria-haspopup="menu"
+                aria-expanded={isMenuOpen}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  event.preventDefault();
+                  setIsMenuOpen((current) => !current);
+                }}
+              >
+                <MoreIcon />
+              </button>
+            </div>
+          </div>
+
+          <div className="game-row-stats">
+            <div className="game-row-stat">
+              <span>Last Played</span>
+              <strong>{lastPlayed}</strong>
+            </div>
+            <div className="game-row-stat">
+              <span>Total Played</span>
+              <strong>{formatDurationLong(game.total_seconds || 0)}</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {isMenuOpen ? (
+        <div
+          className="game-card-menu right-2 top-12"
+          role="menu"
+          onClick={(event) => {
+            event.stopPropagation();
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className="game-card-menu-item"
+            onClick={(event) => {
+              event.stopPropagation();
+              setIsMenuOpen(false);
+              onEdit?.();
+            }}
+          >
+            <PencilIcon />
+            <span>Edit Info</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="game-card-menu-item is-danger"
+            onClick={async (event) => {
+              event.stopPropagation();
+              setIsMenuOpen(false);
+              await onDelete?.();
+            }}
+          >
+            <TrashIcon />
+            <span>Delete Game</span>
+          </button>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function formatStoreBadgeLabel(value) {
+  const label = String(value || "").trim();
+  if (!label) {
+    return "";
+  }
+
+  const normalized = label.toLowerCase().replace(/\s+/g, " ").trim();
+  switch (normalized) {
+    case "non-store":
+    case "non store":
+    case "manual":
+    case "pc":
+      return "";
+    case "microsoft":
+    case "microsoft store":
+    case "ms store":
+    case "xbox app":
+      return "MS Store";
+    case "rockstar games launcher":
+      return "R* Launcher";
+    case "rockstar games":
+    case "rockstar":
+      return "Rockstar";
+    case "ubisoft connect":
+      return "Ubisoft";
+    case "epic games":
+    case "epic games store":
+      return "Epic";
+    case "ea app":
+    case "origin":
+    case "ea":
+      return "EA";
+    case "playstation":
+    case "ps":
+      return "PS";
+    default:
+      return label;
+  }
+}
+
+function buildRowMediaCandidates(game, steamHeaderUrl = "") {
+  const headers = resolveSteamLibraryHeaderMediaCandidates(
+    steamHeaderUrl,
+    game?.steam_appid,
+    game?.backdrop_url,
+    game?.cover_url
+  );
+  const explicitHeader = resolveExplicitRowHeader(steamHeaderUrl);
+  const backdrop = resolveBackdropMedia(game?.backdrop_url);
+  const coverBackdrop = resolveBackdropMedia(game?.cover_url);
+  const cover = resolveCoverMedia(game?.cover_url);
+  const preferredHeaders = [explicitHeader, ...headers].filter(Boolean);
+  const stableVisuals = [backdrop, coverBackdrop, cover].filter(Boolean);
+  return [...new Set([...preferredHeaders, ...stableVisuals])];
+}
+
+function resolveExplicitRowHeader(value) {
+  const source = String(value || "").trim();
+  if (!source) {
+    return "";
+  }
+
+  const normalized = source.replace(/\\/g, "/");
+  const isRemoteSteamAsset = /steamstatic\.com\/store_item_assets\/steam\/apps\//i.test(normalized);
+  const hasImageExtension = /\.[a-z0-9]{2,6}(?:\?.*)?$/i.test(normalized);
+  if (isRemoteSteamAsset && !hasImageExtension) {
+    return "";
+  }
+
+  return resolveGenericMedia(source);
+}
+
+function formatLastPlayed(timestamp) {
+  const value = Number(timestamp || 0);
+  if (value <= 0) {
+    return "Never";
+  }
+
+  const diffSeconds = Math.max(0, Math.floor(Date.now() / 1000) - value);
+  const diffDays = Math.floor(diffSeconds / 86400);
+  if (diffDays <= 0) {
+    return "Today";
+  }
+  if (diffDays === 1) {
+    return "1 day ago";
+  }
+  if (diffDays < 30) {
+    return `${diffDays} days ago`;
+  }
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffMonths < 12) {
+    return `${diffMonths} month${diffMonths === 1 ? "" : "s"} ago`;
+  }
+  const diffYears = Math.floor(diffMonths / 12);
+  return `${diffYears} year${diffYears === 1 ? "" : "s"} ago`;
+}
