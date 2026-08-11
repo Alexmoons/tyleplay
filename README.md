@@ -4,7 +4,7 @@ TylePlay is a desktop application for tracking gaming sessions.
 
 > Only supports tracking native PC game executable files (`.exe`). Game emulators and non-executable launchers are not supported yet.
 ---
- ## Screenshoot
+ ## Screenshots
 <table>
   <tr>
     <th colspan="2" align="center">Dashboard</th>
