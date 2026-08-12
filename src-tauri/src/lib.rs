@@ -170,6 +170,7 @@ struct GameSummary {
     executable_name: Option<String>,
     executable_path: Option<String>,
     tracking_status: String,
+    completion_status: String,
 }
 
 #[derive(Serialize)]
@@ -336,6 +337,7 @@ struct UpdateGameMetadataInput {
     developers: Vec<String>,
     publishers: Vec<String>,
     age_rating_label: Option<String>,
+    completion_status: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -389,6 +391,7 @@ struct GameDetail {
     publishers: Vec<String>,
     age_rating: Option<AgeRatingInfo>,
     created_at: i64,
+    completion_status: String,
     play_sessions: Vec<PlaySession>,
 }
 
@@ -580,6 +583,7 @@ struct LocalGameDetailRow {
     developers: Vec<String>,
     publishers: Vec<String>,
     age_rating: Option<AgeRatingInfo>,
+    completion_status: String,
 }
 
 struct SessionRow {
@@ -620,6 +624,7 @@ struct GameRecord {
     metadata_locked: bool,
     created_at: i64,
     updated_at: i64,
+    completion_status: String,
 }
 
 struct ArchivedGameRecord {
@@ -2114,6 +2119,10 @@ fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
         [],
     );
     let _ = conn.execute(
+        "ALTER TABLE games ADD COLUMN completion_status TEXT NOT NULL DEFAULT 'Backlog'",
+        [],
+    );
+    let _ = conn.execute(
         "ALTER TABLE executables ADD COLUMN exe_path_display TEXT",
         [],
     );
@@ -2134,6 +2143,18 @@ fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
     if cleaned > 0 {
         log::info!("legacy executable cleanup removed {cleaned} stale executable record(s)");
     }
+    let _ = conn.execute(
+        "
+        UPDATE games
+        SET completion_status = 'In Progress'
+        WHERE completion_status = 'Backlog'
+          AND (
+            id IN (SELECT DISTINCT game_id FROM sessions WHERE duration_seconds IS NOT NULL AND duration_seconds > 0)
+            OR playtime_adjustment_seconds > 0
+          )
+        ",
+        [],
+    );
     seed_notifications_if_empty(conn)?;
     Ok(())
 }
@@ -2165,6 +2186,10 @@ fn run_archive_migrations(conn: &Connection) -> rusqlite::Result<()> {
     );
     let _ = conn.execute(
         "ALTER TABLE archive_games ADD COLUMN title_logo_zoom REAL",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE archive_games ADD COLUMN completion_status TEXT NOT NULL DEFAULT 'Backlog'",
         [],
     );
     let _ = conn.execute(
@@ -2537,7 +2562,8 @@ fn load_game_record(conn: &Connection, game_id: i64) -> Result<Option<GameRecord
         is_favorite,
         metadata_locked,
         created_at,
-        updated_at
+        updated_at,
+        COALESCE(completion_status, 'Backlog') AS completion_status
       FROM games
       WHERE id = ?1
       ",
@@ -2575,6 +2601,7 @@ fn load_game_record(conn: &Connection, game_id: i64) -> Result<Option<GameRecord
                 metadata_locked: row.get::<_, i64>(28)? != 0,
                 created_at: row.get(29)?,
                 updated_at: row.get(30)?,
+                completion_status: row.get(31)?,
             })
         },
     )
@@ -2620,7 +2647,8 @@ fn load_archived_game_record(
         is_favorite,
         metadata_locked,
         created_at,
-        updated_at
+        updated_at,
+        COALESCE(completion_status, 'Backlog') AS completion_status
       FROM archive_games
       WHERE id = ?1
       ",
@@ -2660,6 +2688,7 @@ fn load_archived_game_record(
                     metadata_locked: row.get::<_, i64>(29)? != 0,
                     created_at: row.get(30)?,
                     updated_at: row.get(31)?,
+                    completion_status: row.get(32)?,
                 },
             })
         },
@@ -2729,14 +2758,14 @@ fn archive_game(
       title_logo_url, use_title_logo, title_logo_position_x, title_logo_position_y, title_logo_zoom, summary,
       release_year, genres_json, platforms_json, developers_json, publishers_json, age_rating_json,
       playtime_adjustment_seconds, igdb_id, steam_appid, steam_assets_json, is_favorite, metadata_locked, primary_exe_name,
-      manual_fingerprint, created_at, updated_at, archived_at
+      manual_fingerprint, created_at, updated_at, archived_at, completion_status
     ) VALUES (
       ?1, ?2, ?3, ?4, ?5, ?6, ?7,
       ?8, ?9, ?10, ?11, ?12, ?13, ?14,
       ?15, ?16, ?17, ?18, ?19, ?20,
       ?21, ?22, ?23, ?24, ?25, ?26, ?27,
       ?28, ?29, ?30, ?31, ?32, ?33,
-      ?34, ?35, ?36
+      ?34, ?35, ?36, ?37
     )
     ",
         params![
@@ -2775,7 +2804,8 @@ fn archive_game(
             manual_fingerprint,
             game.created_at,
             game.updated_at,
-            now_ts()
+            now_ts(),
+            game.completion_status
         ],
     )
     .map_err(|err| err.to_string())?;
@@ -2972,12 +3002,12 @@ fn restore_archived_game(
       steam_header_url, backdrop_position_x, backdrop_position_y, backdrop_zoom, title_logo_url, use_title_logo, title_logo_position_x,
       title_logo_position_y, title_logo_zoom, summary, release_year, genres_json,
       platforms_json, developers_json, publishers_json, age_rating_json, playtime_adjustment_seconds,
-      igdb_id, steam_appid, steam_assets_json, is_favorite, metadata_locked, created_at, updated_at
+      igdb_id, steam_appid, steam_assets_json, is_favorite, metadata_locked, created_at, updated_at, completion_status
     ) VALUES (
       ?1, ?2, ?3, ?4, ?5, ?6, ?7,
       ?8, ?9, ?10, ?11, ?12, ?13, ?14,
       ?15, ?16, ?17, ?18, ?19, ?20, ?21,
-      ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31
+      ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32
     )
     ",
     params![
@@ -3011,7 +3041,8 @@ fn restore_archived_game(
       if archived.record.is_favorite { 1 } else { 0 },
       if archived.record.metadata_locked { 1 } else { 0 },
       archived.record.created_at,
-      now_ts()
+      now_ts(),
+      archived.record.completion_status
     ],
   )
   .map_err(|err| err.to_string())?;
@@ -3106,6 +3137,11 @@ fn scan_once(state: &AppState) -> Result<bool, String> {
                 )
                 .map_err(|err| err.to_string())?;
 
+                let _ = conn.execute(
+                    "UPDATE games SET completion_status = 'In Progress' WHERE id = ?1 AND completion_status = 'Backlog'",
+                    params![game_id],
+                );
+
                 let session_id = conn.last_insert_rowid();
                 tracker.active.insert(
                     executable_id,
@@ -3137,6 +3173,12 @@ fn scan_once(state: &AppState) -> Result<bool, String> {
                     params![now, duration, active.session_id],
                 )
                 .map_err(|err| err.to_string())?;
+
+                let _ = conn.execute(
+                    "UPDATE games SET completion_status = 'In Progress' WHERE id = ?1 AND completion_status = 'Backlog'",
+                    params![active.game_id],
+                );
+
                 insert_notification(&conn, "played", &active.game_name, now)?;
                 changed = true;
             }
@@ -4138,11 +4180,12 @@ fn query_games(
         g.playtime_adjustment_seconds,
         MAX(s.ended_at) AS last_played,
         g.is_favorite,
-        COUNT(DISTINCT e.id) AS executable_count
+        COUNT(DISTINCT e.id) AS executable_count,
+        COALESCE(g.completion_status, 'Backlog') AS completion_status
       FROM games g
       LEFT JOIN sessions s ON s.game_id = g.id AND s.duration_seconds IS NOT NULL
       LEFT JOIN executables e ON e.game_id = g.id AND e.status = 'tracked'
-      GROUP BY g.id, g.name, g.igdb_id, g.steam_appid, g.store, g.cover_url, g.steam_header_url, g.cover_position_x, g.cover_position_y, g.cover_zoom, g.backdrop_url, g.backdrop_position_x, g.backdrop_position_y, g.backdrop_zoom, g.created_at, g.release_year, g.playtime_adjustment_seconds, g.is_favorite
+      GROUP BY g.id, g.name, g.igdb_id, g.steam_appid, g.store, g.cover_url, g.steam_header_url, g.cover_position_x, g.cover_position_y, g.cover_zoom, g.backdrop_url, g.backdrop_position_x, g.backdrop_position_y, g.backdrop_zoom, g.created_at, g.release_year, g.playtime_adjustment_seconds, g.is_favorite, g.completion_status
       ORDER BY tracked_total_seconds + g.playtime_adjustment_seconds DESC, last_played DESC, g.name ASC
       {}
     ",
@@ -4173,6 +4216,12 @@ fn query_games(
             });
             let executable_count = if exe_exists { 1i64 } else { 0i64 };
 
+            let total_seconds = finished_total
+                + active_by_game.get(&id).copied().unwrap_or_default()
+                + playtime_adjustment_seconds;
+            let last_played = row.get::<_, Option<i64>>(19)?;
+            let completion_status = row.get::<_, String>(22)?;
+
             Ok(GameSummary {
                 id,
                 name: row.get(1)?,
@@ -4190,16 +4239,15 @@ fn query_games(
                 backdrop_zoom: row.get(13)?,
                 created_at: row.get(14)?,
                 release_year: row.get(15)?,
-                total_seconds: finished_total
-                    + active_by_game.get(&id).copied().unwrap_or_default()
-                    + playtime_adjustment_seconds,
-                last_played: row.get::<_, Option<i64>>(19)?,
-                finished_last_played: row.get::<_, Option<i64>>(19)?,
+                total_seconds,
+                last_played,
+                finished_last_played: last_played,
                 is_favorite: row.get::<_, i64>(20)? != 0,
                 executable_count,
                 executable_name,
                 executable_path,
                 tracking_status: "tracked".to_string(),
+                completion_status,
             })
         })
         .map_err(|err| err.to_string())?;
@@ -5364,6 +5412,7 @@ fn update_game_metadata(
     let developers = normalize_string_list(input.developers);
     let publishers = normalize_string_list(input.publishers);
     let age_rating = build_manual_age_rating(input.age_rating_label);
+    let completion_status = normalize_optional_text(input.completion_status).unwrap_or_else(|| "Backlog".to_string());
     let release_year = input
         .release_year
         .filter(|year| (1970..=2100).contains(year));
@@ -5397,6 +5446,7 @@ fn update_game_metadata(
         developers_json = ?21,
         publishers_json = ?22,
         age_rating_json = ?23,
+        completion_status = ?25,
         metadata_locked = 1,
         updated_at = ?24
       WHERE id = ?1
@@ -5430,6 +5480,7 @@ fn update_game_metadata(
                     .transpose()
                     .map_err(|err| err.to_string())?,
                 now,
+                completion_status,
             ],
         )
         .map_err(|err| err.to_string())?;
@@ -5827,12 +5878,13 @@ fn query_local_game_detail(
           WHERE game_id = g.id AND status = 'tracked'
           ORDER BY updated_at DESC, id DESC
           LIMIT 1
-        ) AS executable_path
+        ) AS executable_path,
+        COALESCE(g.completion_status, 'Backlog') AS completion_status
       FROM games g
       LEFT JOIN sessions s ON s.game_id = g.id AND s.duration_seconds IS NOT NULL
       LEFT JOIN executables e ON e.game_id = g.id AND e.status = 'tracked'
       WHERE g.id = ?1
-      GROUP BY g.id, g.name, g.store, g.cover_url, g.cover_position_x, g.cover_position_y, g.cover_zoom, g.backdrop_url, g.steam_header_url, g.backdrop_position_x, g.backdrop_position_y, g.backdrop_zoom, g.title_logo_url, g.use_title_logo, g.title_logo_position_x, g.title_logo_position_y, g.title_logo_zoom, g.igdb_id, g.metadata_locked, g.created_at, g.updated_at, g.release_year, g.summary, g.genres_json, g.platforms_json, g.developers_json, g.publishers_json, g.age_rating_json, g.playtime_adjustment_seconds, g.is_favorite
+      GROUP BY g.id, g.name, g.store, g.cover_url, g.cover_position_x, g.cover_position_y, g.cover_zoom, g.backdrop_url, g.steam_header_url, g.backdrop_position_x, g.backdrop_position_y, g.backdrop_zoom, g.title_logo_url, g.use_title_logo, g.title_logo_position_x, g.title_logo_position_y, g.title_logo_zoom, g.igdb_id, g.metadata_locked, g.created_at, g.updated_at, g.release_year, g.summary, g.genres_json, g.platforms_json, g.developers_json, g.publishers_json, g.age_rating_json, g.playtime_adjustment_seconds, g.is_favorite, g.completion_status
       ",
       params![game_id],
       |row| {
@@ -5860,6 +5912,10 @@ fn query_local_game_detail(
         } else {
           0i64
         };
+
+        let total_seconds = tracked_total_seconds + active_total + playtime_adjustment_seconds;
+        let last_played = row.get::<_, Option<i64>>(30)?;
+        let completion_status = row.get::<_, String>(35)?;
 
         Ok(LocalGameDetailRow {
           id: row.get(0)?,
@@ -5889,13 +5945,14 @@ fn query_local_game_detail(
           developers: parse_json_vec(row.get(25)?),
           publishers: parse_json_vec(row.get(26)?),
           age_rating: parse_json_age_rating(row.get(27)?),
-          total_seconds: tracked_total_seconds + active_total + playtime_adjustment_seconds,
+          total_seconds,
           playtime_adjustment_seconds,
-          last_played: row.get::<_, Option<i64>>(30)?,
+          last_played,
           is_favorite: row.get::<_, i64>(31)? != 0,
           executable_count,
           executable_name,
           executable_path,
+          completion_status,
         })
       },
     )
@@ -6309,6 +6366,7 @@ fn get_game_detail(state: tauri::State<AppState>, game_id: i64) -> Result<GameDe
         publishers: local.publishers,
         age_rating: local.age_rating,
         created_at: local.created_at,
+        completion_status: local.completion_status,
         play_sessions: query_game_sessions(&conn, game_id, &tracker)?,
     })
 }

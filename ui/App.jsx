@@ -954,6 +954,13 @@ function App() {
         if (activeTab === "favorites" && !game.isFavorite) {
           return false;
         }
+        if (activeTab.startsWith("status:")) {
+          const targetStatus = activeTab.slice("status:".length);
+          const gameStatus = game.completion_status || "Backlog";
+          if (gameStatus.toLowerCase() !== targetStatus.toLowerCase()) {
+            return false;
+          }
+        }
         if (activeTab.startsWith("store:")) {
           const gameStoreTabId = buildLibraryStoreTabId(normalizeLibraryStoreLabel(game.store));
           if (gameStoreTabId !== activeTab) {
@@ -1113,10 +1120,59 @@ function App() {
     }
   }
 
+  async function handleUpdateStatus(gameId, nextStatus) {
+    try {
+      const numericGameId = Number(gameId);
+      const targetGame = enrichedLibrary.find((g) => Number(g.id) === numericGameId);
+      if (!targetGame) {
+        return false;
+      }
+
+      await invoke("update_game_metadata", {
+        input: {
+          gameId: numericGameId,
+          name: targetGame.name,
+          store: targetGame.store || null,
+          coverUrl: targetGame.cover_url || null,
+          coverPositionX: targetGame.cover_position_x,
+          coverPositionY: targetGame.cover_position_y,
+          coverZoom: targetGame.cover_zoom,
+          backdropUrl: targetGame.backdrop_url || null,
+          backdropPositionX: targetGame.backdrop_position_x,
+          backdropPositionY: targetGame.backdrop_position_y,
+          backdropZoom: targetGame.backdrop_zoom,
+          titleLogoUrl: targetGame.title_logo_url || null,
+          useTitleLogo: targetGame.use_title_logo,
+          titleLogoPositionX: targetGame.title_logo_position_x,
+          titleLogoPositionY: targetGame.title_logo_position_y,
+          titleLogoZoom: targetGame.title_logo_zoom,
+          summary: targetGame.summary || null,
+          releaseYear: targetGame.release_year || null,
+          genres: targetGame.genres || [],
+          platforms: targetGame.platforms || [],
+          developers: targetGame.developers || [],
+          publishers: targetGame.publishers || [],
+          ageRatingLabel: targetGame.age_rating?.label || null,
+          completionStatus: nextStatus,
+        },
+      });
+
+      setLibrary((current) =>
+        current.map((game) => (Number(game.id) === numericGameId ? { ...game, completion_status: nextStatus } : game))
+      );
+      pushAppNotice({
+        tone: "success",
+        title: "Status updated.",
+        message: `Completion status changed to "${nextStatus}".`,
+      });
+      return true;
+    } catch (nextError) {
+      notifyAppError("Unable to update status.", nextError);
+      return false;
+    }
+  }
+
   async function handleDeleteGame(gameId) {
-    const numericGameId = Number(gameId);
-    const game = enrichedLibrary.find((entry) => Number(entry.id) === numericGameId);
-    const label = game?.name || "this game";
 
     setConfirmState({
       title: "Delete Game",
@@ -1396,6 +1452,7 @@ function App() {
                     onOpenGameEdit={openGameEdit}
                     onDeleteGame={handleDeleteGame}
                     onToggleFavorite={handleToggleFavorite}
+                    onUpdateStatus={handleUpdateStatus}
                     onOpenAddGame={() => setIsAddGameOpen(true)}
                     onResetAllMetadata={handleResetLibraryMetadata}
                     isResettingAllMetadata={isResettingLibraryMetadata}

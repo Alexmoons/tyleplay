@@ -6,6 +6,7 @@ import { buildLogoPresentationStyle, getInitials, resolveBackdropMedia, resolveG
 import { invoke } from "../lib/tauri";
 
 const STORE_OPTIONS = ["", "Steam", "Epic Games", "GOG", "Microsoft Store", "PlayStation", "Rockstar", "EA App", "Ubisoft Connect"];
+const COMPLETION_STATUS_OPTIONS = ["Backlog", "In Progress", "Completed", "100% Mastered", "Dropped"];
 const AGE_RATING_OPTIONS = ["", "PEGI 3", "PEGI 7", "PEGI 12", "PEGI 16", "PEGI 18"];
 const RELEASE_YEAR_OPTIONS = Array.from({ length: 201 }, (_, index) => String(1900 + index));
 const DEFAULT_POSITION = 50;
@@ -306,6 +307,7 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
           developers: splitList(currentForm.developersInput),
           publishers: splitList(currentForm.publishersInput),
           ageRatingLabel: currentForm.ageRatingLabel || null,
+          completionStatus: currentForm.completionStatus || "Backlog",
         },
       });
 
@@ -499,6 +501,15 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
                 options={AGE_RATING_OPTIONS}
                 placeholder="Select rating"
                 onChange={(value) => updateField("ageRatingLabel", value)}
+              />
+            </Field>
+
+            <Field label="Completion Status" element="div">
+              <PopupSelect
+                value={form.completionStatus}
+                options={(form.completionStatus === "Backlog" && currentTotalSeconds === 0 && !detail?.last_played && !fallbackGame?.last_played) ? COMPLETION_STATUS_OPTIONS : COMPLETION_STATUS_OPTIONS.filter((opt) => opt.value !== "Backlog")}
+                placeholder="Select status"
+                onChange={(value) => updateField("completionStatus", value)}
               />
             </Field>
 
@@ -1109,6 +1120,7 @@ function createEmptyForm() {
     store: "",
     releaseYear: "",
     ageRatingLabel: "",
+    completionStatus: "Backlog",
     executablePath: "",
     summary: "",
     coverUrl: "",
@@ -1140,6 +1152,7 @@ function buildFormState(detail, fallbackGame) {
     store: String(source.store || ""),
     releaseYear: source.release_year ? String(source.release_year) : "",
     ageRatingLabel: String(detail?.age_rating?.label || ""),
+    completionStatus: String(source.completion_status || "Backlog"),
     executablePath: String(detail?.executable_path || ""),
     summary: String(detail?.summary || ""),
     coverUrl: String(source.cover_url || ""),

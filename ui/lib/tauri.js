@@ -360,6 +360,13 @@ for (const game of mockLibrary) {
   if (typeof game.is_favorite !== "boolean") {
     game.is_favorite = false;
   }
+  if (!game.completion_status || game.completion_status === "Backlog") {
+    if ((game.total_seconds || 0) > 0 || game.last_played) {
+      game.completion_status = "In Progress";
+    } else {
+      game.completion_status = "Backlog";
+    }
+  }
 }
 
 mockLibrary[2].is_favorite = true;
@@ -507,11 +514,15 @@ for (const game of mockLibrary) {
   if (typeof game.is_favorite !== "boolean") {
     game.is_favorite = false;
   }
+  if (!game.completion_status) {
+    game.completion_status = "Backlog";
+  }
   const detail = mockGameDetails[game.id];
   if (detail) {
     game.executable_path = detail.executable_path || null;
     game.executable_name = detail.executable_name || null;
     game.executable_count = detail.executable_path ? 1 : 0;
+    detail.completion_status = detail.completion_status || game.completion_status || "Backlog";
   }
 }
 
@@ -1222,6 +1233,8 @@ export async function invoke(command, args) {
       ? { label: input.ageRatingLabel, description: "", image_url: null }
       : null;
 
+    const resolvedStatus = input.completionStatus || detail.completion_status || "Backlog";
+
     Object.assign(detail, {
       id: gameId,
       name: input.name,
@@ -1246,6 +1259,7 @@ export async function invoke(command, args) {
       developers: Array.isArray(input.developers) ? input.developers : [],
       publishers: Array.isArray(input.publishers) ? input.publishers : [],
       age_rating: nextAgeRating,
+      completion_status: resolvedStatus,
       metadata_locked: true,
       has_igdb_link: Boolean(detail.has_igdb_link),
       total_seconds: detail.total_seconds || libraryGame?.total_seconds || 0,
@@ -1264,6 +1278,7 @@ export async function invoke(command, args) {
         cover_position_x: input.coverPositionX ?? 50,
         cover_position_y: input.coverPositionY ?? 50,
         cover_zoom: input.coverZoom ?? 100,
+        completion_status: resolvedStatus,
         backdrop_url: input.backdropUrl || null,
         backdrop_position_x: input.backdropPositionX ?? 50,
         backdrop_position_y: input.backdropPositionY ?? 50,

@@ -44,6 +44,7 @@ export default function LibraryPage({
   onOpenGameEdit,
   onDeleteGame,
   onToggleFavorite,
+  onUpdateStatus,
   onOpenAddGame,
   onResetAllMetadata,
   isResettingAllMetadata = false,
@@ -160,6 +161,7 @@ export default function LibraryPage({
               onEdit={() => onOpenGameEdit?.(game.id)}
               onDelete={() => onDeleteGame?.(game.id)}
               onToggleFavorite={(isFavorite) => onToggleFavorite?.(game.id, isFavorite)}
+              onUpdateStatus={(gameId, status) => onUpdateStatus?.(gameId, status)}
             />
             ))}
       </div>
@@ -309,6 +311,11 @@ function CategorySelect({ storeTabs, activeTab, onSelectCategory }) {
     { value: "installed", label: "Installed Games" },
     { value: "favorites", label: "Favorites" },
     { value: "unplayed", label: "Unplayed Games" },
+    { value: "status:Backlog", label: "Backlog / Not Started" },
+    { value: "status:In Progress", label: "In Progress / Playing" },
+    { value: "status:Completed", label: "Completed / Beaten" },
+    { value: "status:100% Mastered", label: "100% Mastered" },
+    { value: "status:Dropped", label: "Dropped / Abandoned" },
     ...storeTabs.map((tab) => ({ value: tab.id, label: tab.label, count: tab.count })),
   ];
 

@@ -143,6 +143,22 @@ export function TrophyIcon(props) {
   return render(Trophy, props);
 }
 
+export function StatusIcon({ status, ...props }) {
+  switch (status) {
+    case "In Progress":
+      return render(Gamepad2, props);
+    case "Completed":
+      return render(CircleCheck, props);
+    case "100% Mastered":
+      return render(Trophy, props);
+    case "Dropped":
+      return render(X, props);
+    case "Backlog":
+    default:
+      return render(Clock3, props);
+  }
+}
+
 export function BookmarkIcon(props) {
   return render(Bookmark, props);
 }

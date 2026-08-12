@@ -26,6 +26,7 @@ import {
   RefreshIcon,
   ShieldIcon,
   StarIcon,
+  StatusIcon,
   StopwatchIcon,
   TagIcon,
   TrashIcon,
@@ -354,6 +355,53 @@ export default function GameDetailPage({
     }
   }
 
+  async function handleStatusChange(nextStatus) {
+    if (!game || !gameId) {
+      return;
+    }
+
+    try {
+      await invoke("update_game_metadata", {
+        input: {
+          gameId,
+          name: game.name,
+          store: game.store || null,
+          coverUrl: game.cover_url || null,
+          coverPositionX: game.cover_position_x,
+          coverPositionY: game.cover_position_y,
+          coverZoom: game.cover_zoom,
+          backdropUrl: game.backdrop_url || null,
+          backdropPositionX: game.backdrop_position_x,
+          backdropPositionY: game.backdrop_position_y,
+          backdropZoom: game.backdrop_zoom,
+          titleLogoUrl: game.title_logo_url || null,
+          useTitleLogo: game.use_title_logo,
+          titleLogoPositionX: game.title_logo_position_x,
+          titleLogoPositionY: game.title_logo_position_y,
+          titleLogoZoom: game.title_logo_zoom,
+          summary: game.summary || null,
+          releaseYear: game.release_year || null,
+          genres: detail?.genres || [],
+          platforms: detail?.platforms || [],
+          developers: detail?.developers || [],
+          publishers: detail?.publishers || [],
+          ageRatingLabel: detail?.age_rating?.label || null,
+          completionStatus: nextStatus,
+        },
+      });
+
+      setDetail((current) => (current ? { ...current, completion_status: nextStatus } : current));
+      await onRefreshLibrary?.();
+      notifyDetail({
+        tone: "success",
+        title: "Status updated.",
+        message: `Completion status changed to "${nextStatus}".`,
+      });
+    } catch (nextError) {
+      notifyDetailError("Unable to update status.", nextError);
+    }
+  }
+
   function handleSessionMonthToggle(monthKey) {
     setOpenSessionMonths((current) => (
       current.includes(monthKey)
@@ -416,12 +464,12 @@ export default function GameDetailPage({
         {/* Backdrop */}
         <div
           className="absolute inset-0 bg-cover bg-top bg-no-repeat transition-all duration-700"
-          style={backdropStyle ? { ...backdropStyle, filter: "brightness(0.75)", backgroundPosition: "center top" } : { backgroundColor: "#1a1a1a" }}
+          style={backdropStyle ? { ...backdropStyle, backgroundPosition: "center top" } : { backgroundColor: "#1a1a1a" }}
         />
 
         {/* Gradients */}
-        <div className="absolute inset-0 bg-gradient-to-t from-[#0f0f0f] via-[#0f0f0f]/40 to-transparent" />
-        <div className="absolute inset-0 bg-gradient-to-r from-[#0f0f0f]/90 via-[#0f0f0f]/40 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#0f0f0f] via-[#0f0f0f]/30 to-transparent pointer-events-none" />
+        <div className="absolute inset-y-0 left-0 w-1/2 bg-gradient-to-r from-[#0f0f0f]/75 via-[#0f0f0f]/25 to-transparent pointer-events-none" />
 
         {/* Hero Content */}
         <div className="absolute top-28 left-0 w-full px-8 flex items-start gap-8 z-20">
@@ -453,7 +501,7 @@ export default function GameDetailPage({
 
             {/* Genres */}
             <div className="flex flex-wrap items-center gap-4 mb-3">
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {genres.length > 0 ? genres.map(g => (
                   <span key={g} className="px-3 py-0.5 bg-[#1a1a1a]/80 hover:bg-[#2a2a2a] transition backdrop-blur-md rounded-full text-xs font-semibold text-gray-200 border border-white/5 shadow-sm">
                     {g}
@@ -500,6 +548,12 @@ export default function GameDetailPage({
                 <span className="icon"><StarIcon fill={isFavorite ? "currentColor" : "none"} /></span>
                 <span className="text">{isFavorite ? "Favorited" : "Favorite"}</span>
               </button>
+              <GameDetailStatusDropdown
+                currentStatus={game?.completion_status || "Backlog"}
+                hasPlaytime={(detail?.total_seconds || 0) > 0 || Boolean(detail?.last_played)}
+                onSelectStatus={handleStatusChange}
+                disabled={loading}
+              />
             </div>
           </div>
         </div>
@@ -1127,3 +1181,88 @@ function SessionYearSelect({ options, value, onChange }) {
     </div>
   );
 }
+
+function getStatusBadgeClass(status) {
+  switch (status) {
+    case "In Progress":
+      return "status-badge-in-progress";
+    case "Completed":
+      return "status-badge-completed";
+    case "100% Mastered":
+      return "status-badge-mastered";
+    case "Dropped":
+      return "status-badge-dropped";
+    default:
+      return "status-badge-backlog";
+  }
+}
+
+function GameDetailStatusDropdown({ currentStatus, hasPlaytime, onSelectStatus, disabled }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    function handlePointerDown(event) {
+      if (!rootRef.current?.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    function handleEscape(event) {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, []);
+
+  const isBacklogAvailable = currentStatus === "Backlog" && !hasPlaytime;
+  const options = isBacklogAvailable
+    ? ["Backlog", "In Progress", "Completed", "100% Mastered", "Dropped"]
+    : ["In Progress", "Completed", "100% Mastered", "Dropped"];
+
+  return (
+    <div ref={rootRef} className="relative inline-block">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setIsOpen((current) => !current)}
+        className={`game-detail-status-pill cursor-pointer transition-all flex items-center gap-2 px-4 rounded-full text-xs font-bold shadow-md border-0 ${getStatusBadgeClass(currentStatus)}`}
+        title="Change completion status"
+      >
+        <StatusIcon status={currentStatus} className="w-4 h-4 shrink-0" />
+        <span className="font-bold text-xs leading-none whitespace-nowrap text-white">{currentStatus}</span>
+        <ChevronDownIcon className="w-3.5 h-3.5 opacity-70 shrink-0 ml-0.5" />
+      </button>
+
+      {isOpen ? (
+        <div className="status-dropdown-panel">
+          {options.map((option) => {
+            const isSelected = option === currentStatus;
+            return (
+              <button
+                key={option}
+                type="button"
+                data-status={option}
+                className={`status-dropdown-item${isSelected ? " is-selected" : ""}`}
+                onClick={() => {
+                  onSelectStatus(option);
+                  setIsOpen(false);
+                }}
+              >
+                <StatusIcon status={option} className="w-3.5 h-3.5 shrink-0" />
+                <span>{option}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+

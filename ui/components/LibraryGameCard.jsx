@@ -8,7 +8,7 @@ import {
   resolveGenericMedia,
   resolveSteamLibraryHeaderMediaCandidates,
 } from "../lib/game-helpers";
-import { MoreIcon, PencilIcon, PlayIcon, StarIcon, TrashIcon } from "./icons";
+import { MoreIcon, PencilIcon, PlayIcon, StarIcon, StatusIcon, TrashIcon } from "./icons";
 
 export default function LibraryGameCard({
   game,
@@ -18,6 +18,7 @@ export default function LibraryGameCard({
   onEdit,
   onDelete,
   onToggleFavorite,
+  onUpdateStatus,
 }) {
   const media = resolveCoverMedia(game.cover_url) || resolveBackdropMedia(game.backdrop_url);
   const posterStyle = buildPosterPresentationStyle(game.cover_position_x, game.cover_position_y, game.cover_zoom);
@@ -59,6 +60,7 @@ export default function LibraryGameCard({
         onEdit={onEdit}
         onDelete={onDelete}
         onToggleFavorite={onToggleFavorite}
+        onUpdateStatus={onUpdateStatus}
         rootRef={rootRef}
         setIsMenuOpen={setIsMenuOpen}
       />
@@ -104,21 +106,32 @@ export default function LibraryGameCard({
           ) : (
             <div />
           )}
-          <button
-            type="button"
-            className={`p-1.5 rounded-full backdrop-blur-md border border-white/10 transition-all cursor-pointer ${
-              isFavorite 
-                ? "bg-[#7068ff]/90 text-white" 
-                : "bg-black/40 text-white/70 hover:bg-black/70 hover:text-white"
-            }`}
-            onClick={(event) => {
-              event.stopPropagation();
-              event.preventDefault();
-              onToggleFavorite?.(!isFavorite);
-            }}
-          >
-            <StarIcon className={`w-3.5 h-3.5 ${isFavorite ? "fill-amber-400 text-amber-400" : ""}`} />
-          </button>
+
+          <div className="flex items-center gap-1.5">
+            <CardStatusDropdown
+              gameId={game.id}
+              currentStatus={game?.completion_status || "Backlog"}
+              hasPlaytime={(game?.total_seconds || 0) > 0 || Boolean(game?.last_played)}
+              onUpdateStatus={onUpdateStatus}
+            />
+
+            <button
+              type="button"
+              className={`p-1.5 rounded-full backdrop-blur-md border border-white/10 transition-all cursor-pointer ${
+                isFavorite 
+                  ? "bg-[#7068ff]/90 text-white" 
+                  : "bg-black/40 text-white/70 hover:bg-black/70 hover:text-white"
+              }`}
+              onClick={(event) => {
+                event.stopPropagation();
+                event.preventDefault();
+                onToggleFavorite?.(!isFavorite);
+              }}
+              title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+            >
+              <StarIcon className={`w-3.5 h-3.5 ${isFavorite ? "fill-amber-400 text-amber-400" : ""}`} />
+            </button>
+          </div>
         </div>
         
         {/* Bottom Content within Image */}
@@ -190,6 +203,7 @@ function RowLibraryGameCard({
   onEdit,
   onDelete,
   onToggleFavorite,
+  onUpdateStatus,
   rootRef,
   setIsMenuOpen,
 }) {
@@ -243,6 +257,12 @@ function RowLibraryGameCard({
           <div className="game-row-head">
             <h3>{game.name}</h3>
             <div className="game-row-actions">
+              <CardStatusDropdown
+                gameId={game.id}
+                currentStatus={game?.completion_status || "Backlog"}
+                hasPlaytime={(game?.total_seconds || 0) > 0 || Boolean(game?.last_played)}
+                onUpdateStatus={onUpdateStatus}
+              />
               <button
                 type="button"
                 className={`game-favorite game-favorite-list${isFavorite ? " is-active" : ""}`}
@@ -422,3 +442,115 @@ function formatLastPlayed(timestamp) {
   const diffYears = Math.floor(diffMonths / 12);
   return `${diffYears} year${diffYears === 1 ? "" : "s"} ago`;
 }
+
+function getStatusBadgeClass(status) {
+  switch (status) {
+    case "In Progress":
+      return "status-badge-in-progress";
+    case "Completed":
+      return "status-badge-completed";
+    case "100% Mastered":
+      return "status-badge-mastered";
+    case "Dropped":
+      return "status-badge-dropped";
+    default:
+      return "status-badge-backlog";
+  }
+}
+
+function getStatusIconBgClass(status) {
+  switch (status) {
+    case "In Progress":
+      return "status-icon-btn-in-progress";
+    case "Completed":
+      return "status-icon-btn-completed";
+    case "100% Mastered":
+      return "status-icon-btn-mastered";
+    case "Dropped":
+      return "status-icon-btn-dropped";
+    case "Backlog":
+    default:
+      return "status-icon-btn-backlog";
+  }
+}
+
+function CardStatusDropdown({ gameId, currentStatus, hasPlaytime, onUpdateStatus }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    function handlePointerDown(event) {
+      if (!rootRef.current?.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    function handleEscape(event) {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, []);
+
+  const isBacklogAvailable = currentStatus === "Backlog" && !hasPlaytime;
+  const options = isBacklogAvailable
+    ? ["Backlog", "In Progress", "Completed", "100% Mastered", "Dropped"]
+    : ["In Progress", "Completed", "100% Mastered", "Dropped"];
+
+  async function handleSelect(event, option) {
+    event.stopPropagation();
+    event.preventDefault();
+    setIsOpen(false);
+    if (option === currentStatus) return;
+    await onUpdateStatus?.(gameId, option);
+  }
+
+  return (
+    <div ref={rootRef} className="relative inline-block">
+      <button
+        type="button"
+        className={`status-icon-btn ${getStatusIconBgClass(currentStatus)}`}
+        title={`Status: ${currentStatus || "Backlog"} (Click to change)`}
+        onClick={(event) => {
+          event.stopPropagation();
+          event.preventDefault();
+          setIsOpen((current) => !current);
+        }}
+      >
+        <StatusIcon status={currentStatus || "Backlog"} className="w-3.5 h-3.5" />
+      </button>
+
+      {isOpen ? (
+        <div
+          className="card-status-dropdown-panel"
+          onClick={(event) => {
+            event.stopPropagation();
+          }}
+        >
+          {options.map((option) => {
+            const isSelected = option === currentStatus;
+            return (
+              <button
+                key={option}
+                type="button"
+                data-status={option}
+                className={`card-status-dropdown-item${isSelected ? " is-selected" : ""}`}
+                onClick={(event) => handleSelect(event, option)}
+              >
+                <StatusIcon status={option} className="w-3.2 h-3.2 shrink-0" />
+                <span>{option}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+

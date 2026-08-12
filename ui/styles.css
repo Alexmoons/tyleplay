@@ -5120,9 +5120,34 @@ img {
   justify-self: start;
 }
 
+.edit-game-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+}
+
+.edit-game-actions .action-button {
+  height: 34px !important;
+  min-height: 34px !important;
+  max-height: 34px !important;
+  padding: 0 1.1rem !important;
+  font-size: 0.82rem !important;
+  font-weight: 600 !important;
+  border-radius: 9999px !important;
+  line-height: 1 !important;
+}
+
+.edit-game-actions .action-button svg {
+  width: 0.92rem;
+  height: 0.92rem;
+}
+
 .edit-game-reset-button {
   min-width: 0;
-  padding-inline: 1rem;
+  padding-inline: 1.1rem;
 }
 
 .edit-game-choice-grid {
@@ -5692,6 +5717,26 @@ img {
 
 .confirm-modal-actions .action-button-danger:hover:not(:disabled) {
   background: rgba(210, 45, 30, 0.6);
+}
+
+.confirm-modal-actions .action-button-igdb-reset,
+.action-button-igdb-reset {
+  height: 38px;
+  padding: 0 1.25rem;
+  border-radius: 9999px;
+  border: 0;
+  background: var(--accent, #7068ff);
+  color: #ffffff;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 180ms ease;
+}
+
+.confirm-modal-actions .action-button-igdb-reset:hover:not(:disabled),
+.action-button-igdb-reset:hover:not(:disabled) {
+  background: var(--accent-hover, #6057f0);
+  color: #ffffff;
 }
 
 .app-context-menu {
@@ -11720,3 +11765,303 @@ body[data-theme="light"] .theme-switch-option.is-active {
     flex-wrap: wrap;
   }
 }
+
+/* Completion Status Badges & Controls */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 9999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  border: 0;
+  letter-spacing: 0.03em;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.status-badge-backlog {
+  background: rgba(255, 255, 255, 0.08);
+  color: #d1d5db;
+}
+
+.status-badge-in-progress {
+  background: rgba(112, 104, 255, 0.18);
+  color: #c0bbff;
+}
+
+.status-badge-completed {
+  background: rgba(16, 185, 129, 0.18);
+  color: #6ee7b7;
+}
+
+.status-badge-mastered {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fcd34d;
+}
+
+.status-badge-dropped {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+}
+
+.btn-status-dropdown,
+.game-detail-status-pill {
+  height: 40px;
+  padding: 0 1rem;
+  border-radius: 9999px;
+  border: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.25);
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.btn-status-dropdown:hover:not(:disabled),
+.game-detail-status-pill:hover:not(:disabled) {
+  filter: brightness(1.18);
+  transform: translateY(-1px);
+}
+
+/* Compact Status Dropdown Panel & Items */
+.status-dropdown-panel {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  margin-top: 6px;
+  z-index: 60;
+  min-width: 155px;
+  padding: 4px;
+  background-color: #161616 !important;
+  border-radius: 14px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.status-dropdown-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-align: left;
+  color: #d1d5db;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+/* Status-specific Hover Effects */
+.status-dropdown-item[data-status="Backlog"]:hover {
+  background-color: rgba(255, 255, 255, 0.14) !important;
+  color: #ffffff !important;
+}
+
+.status-dropdown-item[data-status="In Progress"]:hover {
+  background-color: rgba(112, 104, 255, 0.28) !important;
+  color: #c0bbff !important;
+}
+
+.status-dropdown-item[data-status="Completed"]:hover {
+  background-color: rgba(16, 185, 129, 0.28) !important;
+  color: #6ee7b7 !important;
+}
+
+.status-dropdown-item[data-status="100% Mastered"]:hover {
+  background-color: rgba(245, 158, 11, 0.28) !important;
+  color: #fcd34d !important;
+}
+
+.status-dropdown-item[data-status="Dropped"]:hover {
+  background-color: rgba(239, 68, 68, 0.28) !important;
+  color: #fca5a5 !important;
+}
+
+/* Selected Item States */
+.status-dropdown-item.is-selected[data-status="Backlog"] {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+  font-weight: 700;
+}
+
+.status-dropdown-item.is-selected[data-status="In Progress"] {
+  background-color: rgba(112, 104, 255, 0.24) !important;
+  color: #c0bbff !important;
+  font-weight: 700;
+}
+
+.status-dropdown-item.is-selected[data-status="Completed"] {
+  background-color: rgba(16, 185, 129, 0.24) !important;
+  color: #6ee7b7 !important;
+  font-weight: 700;
+}
+
+.status-dropdown-item.is-selected[data-status="100% Mastered"] {
+  background-color: rgba(245, 158, 11, 0.24) !important;
+  color: #fcd34d !important;
+  font-weight: 700;
+}
+
+.status-dropdown-item.is-selected[data-status="Dropped"] {
+  background-color: rgba(239, 68, 68, 0.24) !important;
+  color: #fca5a5 !important;
+  font-weight: 700;
+}
+
+/* Card Mini Status Dropdown Panel & Items */
+.card-status-dropdown-panel {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  z-index: 60;
+  min-width: 135px;
+  padding: 3px;
+  background-color: #161616 !important;
+  border-radius: 12px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.card-status-dropdown-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  font-size: 0.71rem;
+  font-weight: 600;
+  text-align: left;
+  color: #d1d5db;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+/* Status-specific Hover Effects for Card Mini Dropdown */
+.card-status-dropdown-item[data-status="Backlog"]:hover {
+  background-color: rgba(255, 255, 255, 0.14) !important;
+  color: #ffffff !important;
+}
+
+.card-status-dropdown-item[data-status="In Progress"]:hover {
+  background-color: rgba(112, 104, 255, 0.28) !important;
+  color: #c0bbff !important;
+}
+
+.card-status-dropdown-item[data-status="Completed"]:hover {
+  background-color: rgba(16, 185, 129, 0.28) !important;
+  color: #6ee7b7 !important;
+}
+
+.card-status-dropdown-item[data-status="100% Mastered"]:hover {
+  background-color: rgba(245, 158, 11, 0.28) !important;
+  color: #fcd34d !important;
+}
+
+.card-status-dropdown-item[data-status="Dropped"]:hover {
+  background-color: rgba(239, 68, 68, 0.28) !important;
+  color: #fca5a5 !important;
+}
+
+/* Selected Item States for Card Mini Dropdown */
+.card-status-dropdown-item.is-selected[data-status="Backlog"] {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+  font-weight: 700;
+}
+
+.card-status-dropdown-item.is-selected[data-status="In Progress"] {
+  background-color: rgba(112, 104, 255, 0.24) !important;
+  color: #c0bbff !important;
+  font-weight: 700;
+}
+
+.card-status-dropdown-item.is-selected[data-status="Completed"] {
+  background-color: rgba(16, 185, 129, 0.24) !important;
+  color: #6ee7b7 !important;
+  font-weight: 700;
+}
+
+.card-status-dropdown-item.is-selected[data-status="100% Mastered"] {
+  background-color: rgba(245, 158, 11, 0.24) !important;
+  color: #fcd34d !important;
+  font-weight: 700;
+}
+
+.card-status-dropdown-item.is-selected[data-status="Dropped"] {
+  background-color: rgba(239, 68, 68, 0.24) !important;
+  color: #fca5a5 !important;
+  font-weight: 700;
+}
+
+/* Status Icon Button Base & Status Variants (No Outline Borders) */
+.status-icon-btn {
+  padding: 0.375rem;
+  border-radius: 9999px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, filter 0.15s ease;
+  cursor: pointer;
+  border: 0 !important;
+  outline: none !important;
+}
+
+.status-icon-btn:hover {
+  transform: scale(1.08);
+  filter: brightness(1.2);
+}
+
+.status-icon-btn-backlog {
+  background-color: rgba(0, 0, 0, 0.65) !important;
+  color: #d1d5db !important;
+}
+
+.status-icon-btn-in-progress {
+  background-color: rgba(112, 104, 255, 0.35) !important;
+  color: #c0bbff !important;
+}
+
+.status-icon-btn-completed {
+  background-color: rgba(16, 185, 129, 0.35) !important;
+  color: #6ee7b7 !important;
+}
+
+.status-icon-btn-mastered {
+  background-color: rgba(245, 158, 11, 0.35) !important;
+  color: #fcd34d !important;
+}
+
+.status-icon-btn-dropped {
+  background-color: rgba(239, 68, 68, 0.35) !important;
+  color: #fca5a5 !important;
+}
+
+
+
+
