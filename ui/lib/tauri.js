@@ -1398,6 +1398,32 @@ export async function invoke(command, args) {
     return {};
   }
 
+  if (command === "update_game_user_rating_review") {
+    const { gameId, userRating, userReview } = payload || {};
+    const game = mockDashboard.recent_games.find(g => g.id === Number(gameId));
+    if (game) {
+      game.user_rating = userRating;
+      game.user_review = userReview;
+    }
+    const detail = mockGameDetails[Number(gameId)];
+    if (detail) {
+      detail.user_rating = userRating;
+      detail.user_review = userReview;
+    }
+    return true;
+  }
+
+  if (command === "update_session_note") {
+    const { sessionId, note } = payload || {};
+    Object.values(mockGameDetails).forEach(detail => {
+      const session = detail?.play_sessions?.find(s => s.id === Number(sessionId));
+      if (session) {
+        session.note = note;
+      }
+    });
+    return true;
+  }
+
   if (command === "launch_game") {
     return null;
   }

@@ -35,6 +35,7 @@ import { clearSteamCapsuleCache } from "./pages/DashboardPage";
 import WeeklyPlaytimePage from "./pages/WeeklyPlaytimePage";
 import WeeklyPlaytimeDetailPage from "./pages/WeeklyPlaytimeDetailPage";
 
+
 const REFRESH_INTERVAL_MS = 5000;
 const CONTENT_BASE_WIDTH = 1248;
 const LIVE_REFRESH_VIEWS = new Set(["dashboard", "notifications"]);
@@ -197,6 +198,8 @@ function App() {
   const [selectedGameId, setSelectedGameId] = useState(initialViewState.selectedGameId);
   const [detailOriginView, setDetailOriginView] = useState(initialViewState.detailOriginView);
   const [statsSubView, setStatsSubView] = useState(initialViewState.statsSubView);
+
+  const previousActiveGamesRef = useRef([]);
   const [historyStack, setHistoryStack] = useState(() => [
     {
       activeView: initialViewState.activeView,
@@ -637,7 +640,14 @@ function App() {
         return;
       }
       if (key === "dashboard") {
-        setDashboard(value && typeof value === "object" ? value : null);
+        const nextDashboard = value && typeof value === "object" ? value : null;
+        const currentActive = Array.isArray(nextDashboard?.active_games) ? nextDashboard.active_games : [];
+        const previousActive = previousActiveGamesRef.current || [];
+        const ended = previousActive.filter((prev) => !currentActive.some((curr) => curr.game_id === prev.game_id));
+
+
+        previousActiveGamesRef.current = currentActive;
+        setDashboard(nextDashboard);
         return;
       }
       if (key === "archive") {
@@ -1721,6 +1731,8 @@ function App() {
           </button>
         </div>
       ) : null}
+
+
     </div>
   );
 }

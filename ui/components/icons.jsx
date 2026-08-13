@@ -59,6 +59,9 @@ import {
   Users,
   X,
   Grid2x2,
+  Check,
+  Notebook,
+  FileText,
 } from "lucide-react";
 
 const iconProps = {
@@ -374,3 +377,20 @@ export function ArrowRightIcon(props) {
 export function ArrowUpIcon(props) {
   return render(ArrowUp, props);
 }
+
+export function CloseCrossIcon(props) {
+  return render(X, props);
+}
+
+export function CheckIcon(props) {
+  return render(Check, props);
+}
+
+export function NotebookIcon(props) {
+  return render(Notebook, props);
+}
+
+export function FileTextIcon(props) {
+  return render(FileText, props);
+}
+

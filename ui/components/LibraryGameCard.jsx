@@ -100,9 +100,11 @@ export default function LibraryGameCard({
         {/* Top Badges */}
         <div className="absolute top-2 w-full px-2 flex justify-between items-start z-10">
           {storeBadgeLabel ? (
-            <span className="bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-1.5 py-0.5 rounded border border-white/10 shadow-sm">
-              {storeBadgeLabel}
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-1.5 py-0.5 rounded border border-white/10 shadow-sm">
+                {storeBadgeLabel}
+              </span>
+            </div>
           ) : (
             <div />
           )}

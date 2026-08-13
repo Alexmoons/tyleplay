@@ -4,6 +4,7 @@ import LoadingIndicator from "../components/LoadingIndicator";
 import { IGDB_GENRE_OPTIONS, IGDB_PLATFORM_OPTIONS } from "../lib/game-option-lists";
 import { buildLogoPresentationStyle, getInitials, resolveBackdropMedia, resolveGenericMedia, resolvePosterMedia, resolveSteamLogoMedia } from "../lib/game-helpers";
 import { invoke } from "../lib/tauri";
+import StarRating from "../components/StarRating";
 
 const STORE_OPTIONS = ["", "Steam", "Epic Games", "GOG", "Microsoft Store", "PlayStation", "Rockstar", "EA App", "Ubisoft Connect"];
 const COMPLETION_STATUS_OPTIONS = ["Backlog", "In Progress", "Completed", "100% Mastered", "Dropped"];
@@ -307,7 +308,7 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
           developers: splitList(currentForm.developersInput),
           publishers: splitList(currentForm.publishersInput),
           ageRatingLabel: currentForm.ageRatingLabel || null,
-          completionStatus: currentForm.completionStatus || "Backlog",
+          completionStatus: detail?.completion_status || fallbackGame?.completion_status || "Backlog",
         },
       });
 
@@ -501,15 +502,6 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
                 options={AGE_RATING_OPTIONS}
                 placeholder="Select rating"
                 onChange={(value) => updateField("ageRatingLabel", value)}
-              />
-            </Field>
-
-            <Field label="Completion Status" element="div">
-              <PopupSelect
-                value={form.completionStatus}
-                options={(form.completionStatus === "Backlog" && currentTotalSeconds === 0 && !detail?.last_played && !fallbackGame?.last_played) ? COMPLETION_STATUS_OPTIONS : COMPLETION_STATUS_OPTIONS.filter((opt) => opt.value !== "Backlog")}
-                placeholder="Select status"
-                onChange={(value) => updateField("completionStatus", value)}
               />
             </Field>
 
@@ -1173,6 +1165,8 @@ function buildFormState(detail, fallbackGame) {
     developersInput: joinList(Array.isArray(detail?.developers) ? detail.developers : []),
     publishersInput: joinList(Array.isArray(detail?.publishers) ? detail.publishers : []),
     playtimeInput: formatDurationInputValue(source.total_seconds || 0),
+    userRating: detail?.user_rating ?? source?.user_rating ?? null,
+    userReview: String(detail?.user_review || source?.user_review || ""),
   };
 }
 

@@ -129,6 +129,7 @@ struct DailyTopGame {
 #[derive(Clone, Serialize)]
 struct ActiveGame {
     game_id: i64,
+    session_id: i64,
     name: String,
     cover_url: Option<String>,
     cover_position_x: Option<f64>,
@@ -171,6 +172,8 @@ struct GameSummary {
     executable_path: Option<String>,
     tracking_status: String,
     completion_status: String,
+    user_rating: Option<i32>,
+    user_review: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -338,6 +341,8 @@ struct UpdateGameMetadataInput {
     publishers: Vec<String>,
     age_rating_label: Option<String>,
     completion_status: Option<String>,
+    user_rating: Option<i32>,
+    user_review: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -392,15 +397,19 @@ struct GameDetail {
     age_rating: Option<AgeRatingInfo>,
     created_at: i64,
     completion_status: String,
+    user_rating: Option<i32>,
+    user_review: Option<String>,
     play_sessions: Vec<PlaySession>,
 }
 
 #[derive(Serialize)]
 struct PlaySession {
+    id: Option<i64>,
     started_at: i64,
     ended_at: Option<i64>,
     duration_seconds: i64,
     is_active: bool,
+    note: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -584,12 +593,16 @@ struct LocalGameDetailRow {
     publishers: Vec<String>,
     age_rating: Option<AgeRatingInfo>,
     completion_status: String,
+    user_rating: Option<i32>,
+    user_review: Option<String>,
 }
 
 struct SessionRow {
+    id: i64,
     started_at: i64,
     ended_at: Option<i64>,
     duration_seconds: Option<i64>,
+    note: Option<String>,
 }
 
 struct GameRecord {
@@ -625,6 +638,8 @@ struct GameRecord {
     created_at: i64,
     updated_at: i64,
     completion_status: String,
+    user_rating: Option<i32>,
+    user_review: Option<String>,
 }
 
 struct ArchivedGameRecord {
@@ -2126,6 +2141,9 @@ fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
         "ALTER TABLE executables ADD COLUMN exe_path_display TEXT",
         [],
     );
+    let _ = conn.execute("ALTER TABLE games ADD COLUMN user_rating INTEGER", []);
+    let _ = conn.execute("ALTER TABLE games ADD COLUMN user_review TEXT", []);
+    let _ = conn.execute("ALTER TABLE sessions ADD COLUMN note TEXT", []);
     conn.execute(
         "
     CREATE TABLE IF NOT EXISTS notifications (
@@ -2196,6 +2214,9 @@ fn run_archive_migrations(conn: &Connection) -> rusqlite::Result<()> {
         "ALTER TABLE archive_games ADD COLUMN steam_header_url TEXT",
         [],
     );
+    let _ = conn.execute("ALTER TABLE archive_games ADD COLUMN user_rating INTEGER", []);
+    let _ = conn.execute("ALTER TABLE archive_games ADD COLUMN user_review TEXT", []);
+    let _ = conn.execute("ALTER TABLE archive_sessions ADD COLUMN note TEXT", []);
     Ok(())
 }
 
@@ -2563,7 +2584,9 @@ fn load_game_record(conn: &Connection, game_id: i64) -> Result<Option<GameRecord
         metadata_locked,
         created_at,
         updated_at,
-        COALESCE(completion_status, 'Backlog') AS completion_status
+        COALESCE(completion_status, 'Backlog') AS completion_status,
+        user_rating,
+        user_review
       FROM games
       WHERE id = ?1
       ",
@@ -2602,6 +2625,8 @@ fn load_game_record(conn: &Connection, game_id: i64) -> Result<Option<GameRecord
                 created_at: row.get(29)?,
                 updated_at: row.get(30)?,
                 completion_status: row.get(31)?,
+                user_rating: row.get(32)?,
+                user_review: row.get(33)?,
             })
         },
     )
@@ -2648,7 +2673,9 @@ fn load_archived_game_record(
         metadata_locked,
         created_at,
         updated_at,
-        COALESCE(completion_status, 'Backlog') AS completion_status
+        COALESCE(completion_status, 'Backlog') AS completion_status,
+        user_rating,
+        user_review
       FROM archive_games
       WHERE id = ?1
       ",
@@ -2689,6 +2716,8 @@ fn load_archived_game_record(
                     created_at: row.get(30)?,
                     updated_at: row.get(31)?,
                     completion_status: row.get(32)?,
+                    user_rating: row.get(33)?,
+                    user_review: row.get(34)?,
                 },
             })
         },
@@ -2835,7 +2864,7 @@ fn archive_game(
     let mut stmt = main_conn
         .prepare(
             "
-      SELECT started_at, ended_at, duration_seconds
+      SELECT id, started_at, ended_at, duration_seconds, note
       FROM sessions
       WHERE game_id = ?1
       ORDER BY started_at ASC, id ASC
@@ -2845,9 +2874,11 @@ fn archive_game(
     let sessions = stmt
         .query_map(params![game_id], |row| {
             Ok(SessionRow {
-                started_at: row.get(0)?,
-                ended_at: row.get(1)?,
-                duration_seconds: row.get(2)?,
+                id: row.get(0)?,
+                started_at: row.get(1)?,
+                ended_at: row.get(2)?,
+                duration_seconds: row.get(3)?,
+                note: row.get(4)?,
             })
         })
         .map_err(|err| err.to_string())?
@@ -2858,14 +2889,15 @@ fn archive_game(
     for session in sessions {
         tx.execute(
             "
-      INSERT INTO archive_sessions (archive_game_id, started_at, ended_at, duration_seconds)
-      VALUES (?1, ?2, ?3, ?4)
+      INSERT INTO archive_sessions (archive_game_id, started_at, ended_at, duration_seconds, note)
+      VALUES (?1, ?2, ?3, ?4, ?5)
       ",
             params![
                 archive_game_id,
                 session.started_at,
                 session.ended_at,
-                session.duration_seconds
+                session.duration_seconds,
+                session.note,
             ],
         )
         .map_err(|err| err.to_string())?;
@@ -3060,7 +3092,7 @@ fn restore_archived_game(
     let mut stmt = archive_conn
         .prepare(
             "
-      SELECT started_at, ended_at, duration_seconds
+      SELECT id, started_at, ended_at, duration_seconds, note
       FROM archive_sessions
       WHERE archive_game_id = ?1
       ORDER BY started_at ASC, id ASC
@@ -3070,9 +3102,11 @@ fn restore_archived_game(
     let sessions = stmt
         .query_map(params![archived.archive_id], |row| {
             Ok(SessionRow {
-                started_at: row.get(0)?,
-                ended_at: row.get(1)?,
-                duration_seconds: row.get(2)?,
+                id: row.get(0)?,
+                started_at: row.get(1)?,
+                ended_at: row.get(2)?,
+                duration_seconds: row.get(3)?,
+                note: row.get(4)?,
             })
         })
         .map_err(|err| err.to_string())?
@@ -3083,14 +3117,15 @@ fn restore_archived_game(
     for session in sessions {
         tx.execute(
             "
-      INSERT INTO sessions (game_id, executable_id, started_at, ended_at, duration_seconds)
-      VALUES (?1, NULL, ?2, ?3, ?4)
+      INSERT INTO sessions (game_id, executable_id, started_at, ended_at, duration_seconds, note)
+      VALUES (?1, NULL, ?2, ?3, ?4, ?5)
       ",
             params![
                 game_id,
                 session.started_at,
                 session.ended_at,
-                session.duration_seconds
+                session.duration_seconds,
+                session.note,
             ],
         )
         .map_err(|err| err.to_string())?;
@@ -3781,6 +3816,7 @@ fn active_games_snapshot(state: &AppState) -> Result<Vec<ActiveGame>, String> {
 
         active_games.push(ActiveGame {
             game_id: active.game_id,
+            session_id: active.session_id,
             name: active.game_name,
             cover_url: artwork.0,
             cover_position_x: artwork.1,
@@ -4181,11 +4217,13 @@ fn query_games(
         MAX(s.ended_at) AS last_played,
         g.is_favorite,
         COUNT(DISTINCT e.id) AS executable_count,
-        COALESCE(g.completion_status, 'Backlog') AS completion_status
+        COALESCE(g.completion_status, 'Backlog') AS completion_status,
+        g.user_rating,
+        g.user_review
       FROM games g
       LEFT JOIN sessions s ON s.game_id = g.id AND s.duration_seconds IS NOT NULL
       LEFT JOIN executables e ON e.game_id = g.id AND e.status = 'tracked'
-      GROUP BY g.id, g.name, g.igdb_id, g.steam_appid, g.store, g.cover_url, g.steam_header_url, g.cover_position_x, g.cover_position_y, g.cover_zoom, g.backdrop_url, g.backdrop_position_x, g.backdrop_position_y, g.backdrop_zoom, g.created_at, g.release_year, g.playtime_adjustment_seconds, g.is_favorite, g.completion_status
+      GROUP BY g.id, g.name, g.igdb_id, g.steam_appid, g.store, g.cover_url, g.steam_header_url, g.cover_position_x, g.cover_position_y, g.cover_zoom, g.backdrop_url, g.backdrop_position_x, g.backdrop_position_y, g.backdrop_zoom, g.created_at, g.release_year, g.playtime_adjustment_seconds, g.is_favorite, g.completion_status, g.user_rating, g.user_review
       ORDER BY tracked_total_seconds + g.playtime_adjustment_seconds DESC, last_played DESC, g.name ASC
       {}
     ",
@@ -4248,6 +4286,8 @@ fn query_games(
                 executable_path,
                 tracking_status: "tracked".to_string(),
                 completion_status,
+                user_rating: row.get(23)?,
+                user_review: row.get(24)?,
             })
         })
         .map_err(|err| err.to_string())?;
@@ -5879,12 +5919,14 @@ fn query_local_game_detail(
           ORDER BY updated_at DESC, id DESC
           LIMIT 1
         ) AS executable_path,
-        COALESCE(g.completion_status, 'Backlog') AS completion_status
+        COALESCE(g.completion_status, 'Backlog') AS completion_status,
+        g.user_rating,
+        g.user_review
       FROM games g
       LEFT JOIN sessions s ON s.game_id = g.id AND s.duration_seconds IS NOT NULL
       LEFT JOIN executables e ON e.game_id = g.id AND e.status = 'tracked'
       WHERE g.id = ?1
-      GROUP BY g.id, g.name, g.store, g.cover_url, g.cover_position_x, g.cover_position_y, g.cover_zoom, g.backdrop_url, g.steam_header_url, g.backdrop_position_x, g.backdrop_position_y, g.backdrop_zoom, g.title_logo_url, g.use_title_logo, g.title_logo_position_x, g.title_logo_position_y, g.title_logo_zoom, g.igdb_id, g.metadata_locked, g.created_at, g.updated_at, g.release_year, g.summary, g.genres_json, g.platforms_json, g.developers_json, g.publishers_json, g.age_rating_json, g.playtime_adjustment_seconds, g.is_favorite, g.completion_status
+      GROUP BY g.id, g.name, g.store, g.cover_url, g.cover_position_x, g.cover_position_y, g.cover_zoom, g.backdrop_url, g.steam_header_url, g.backdrop_position_x, g.backdrop_position_y, g.backdrop_zoom, g.title_logo_url, g.use_title_logo, g.title_logo_position_x, g.title_logo_position_y, g.title_logo_zoom, g.igdb_id, g.metadata_locked, g.created_at, g.updated_at, g.release_year, g.summary, g.genres_json, g.platforms_json, g.developers_json, g.publishers_json, g.age_rating_json, g.playtime_adjustment_seconds, g.is_favorite, g.completion_status, g.user_rating, g.user_review
       ",
       params![game_id],
       |row| {
@@ -5953,6 +5995,8 @@ fn query_local_game_detail(
           executable_name,
           executable_path,
           completion_status,
+          user_rating: row.get(36)?,
+          user_review: row.get(37)?,
         })
       },
     )
@@ -5970,7 +6014,7 @@ fn query_game_sessions(
     let mut stmt = conn
         .prepare(
             "
-      SELECT started_at, ended_at, duration_seconds
+      SELECT id, started_at, ended_at, duration_seconds, note
       FROM sessions
       WHERE game_id = ?1 AND duration_seconds IS NOT NULL
       ORDER BY started_at DESC, id DESC
@@ -5981,9 +6025,11 @@ fn query_game_sessions(
     let mut sessions = stmt
         .query_map(params![game_id], |row| {
             Ok(SessionRow {
-                started_at: row.get(0)?,
-                ended_at: row.get(1)?,
-                duration_seconds: row.get(2)?,
+                id: row.get(0)?,
+                started_at: row.get(1)?,
+                ended_at: row.get(2)?,
+                duration_seconds: row.get(3)?,
+                note: row.get(4)?,
             })
         })
         .map_err(|err| format!("failed to read game sessions: {err}"))?
@@ -5991,10 +6037,12 @@ fn query_game_sessions(
         .map_err(|err| format!("failed to collect game sessions: {err}"))?
         .into_iter()
         .map(|session| PlaySession {
+            id: Some(session.id),
             started_at: session.started_at,
             ended_at: session.ended_at,
             duration_seconds: session.duration_seconds.unwrap_or(0),
             is_active: false,
+            note: session.note,
         })
         .collect::<Vec<_>>();
 
@@ -6004,10 +6052,12 @@ fn query_game_sessions(
             .values()
             .filter(|session| session.game_id == game_id)
             .map(|session| PlaySession {
+                id: Some(session.session_id),
                 started_at: session.started_at,
                 ended_at: None,
                 duration_seconds: (now_ts() - session.started_at).max(0),
                 is_active: true,
+                note: None,
             }),
     );
 
@@ -6367,8 +6417,53 @@ fn get_game_detail(state: tauri::State<AppState>, game_id: i64) -> Result<GameDe
         age_rating: local.age_rating,
         created_at: local.created_at,
         completion_status: local.completion_status,
+        user_rating: local.user_rating,
+        user_review: local.user_review,
         play_sessions: query_game_sessions(&conn, game_id, &tracker)?,
     })
+}
+
+#[tauri::command]
+fn update_game_user_rating_review(
+    app: AppHandle,
+    game_id: i64,
+    user_rating: Option<i32>,
+    user_review: Option<String>,
+) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let conn = state.db.lock().map_err(|_| "failed to lock db".to_string())?;
+    let normalized_review = normalize_optional_text(user_review);
+    let valid_rating = user_rating.filter(|&r| (1..=5).contains(&r));
+    let now = now_ts();
+
+    conn.execute(
+        "UPDATE games SET user_rating = ?1, user_review = ?2, updated_at = ?3 WHERE id = ?4",
+        params![valid_rating, normalized_review, now, game_id],
+    )
+    .map_err(|err| format!("failed to update rating/review: {err}"))?;
+
+    app.emit("game-updated", game_id).ok();
+    Ok(())
+}
+
+#[tauri::command]
+fn update_session_note(
+    app: AppHandle,
+    session_id: i64,
+    note: Option<String>,
+) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let conn = state.db.lock().map_err(|_| "failed to lock db".to_string())?;
+    let normalized_note = normalize_optional_text(note);
+
+    conn.execute(
+        "UPDATE sessions SET note = ?1 WHERE id = ?2",
+        params![normalized_note, session_id],
+    )
+    .map_err(|err| format!("failed to update session note: {err}"))?;
+
+    app.emit("session-updated", session_id).ok();
+    Ok(())
 }
 
 #[tauri::command]
@@ -7291,7 +7386,9 @@ pub fn run() {
             reset_game_playtime,
             reset_game_metadata_to_igdb,
             reset_library_metadata_to_igdb,
-            refresh_library_metadata
+            refresh_library_metadata,
+            update_game_user_rating_review,
+            update_session_note
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

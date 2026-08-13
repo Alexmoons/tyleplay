@@ -18,9 +18,11 @@ import {
   ChevronDownIcon,
   ClockIcon,
   ExportIcon,
+  FileTextIcon,
   FolderIcon,
   GamepadOutlineIcon,
   MonitorIcon,
+  MoonIcon,
   PencilIcon,
   PlaySolidIcon,
   RefreshIcon,
@@ -34,6 +36,9 @@ import {
   UsersIcon,
 } from "../components/icons";
 import LoadingIndicator from "../components/LoadingIndicator";
+import StarRating from "../components/StarRating";
+import PostSessionJournalModal from "../components/PostSessionJournalModal";
+import { NotebookIcon } from "../components/icons";
 
 function AboutTooltipSection({ summary }) {
   const [position, setPosition] = useState(null);
@@ -100,18 +105,306 @@ function AboutTooltipSection({ summary }) {
       </p>
       {position && isTruncated && summary && typeof document !== "undefined"
         ? createPortal(
+          <div
+            className="about-tooltip-bubble"
+            style={{
+              left: `${position.x}px`,
+              top: `${position.y}px`,
+            }}
+          >
+            {summary}
+          </div>,
+          document.body
+        )
+        : null}
+    </div>
+  );
+}
+
+function SessionConnectorTooltipAnchor({ session, children }) {
+  const [position, setPosition] = useState(null);
+  const isVisibleRef = useRef(false);
+
+  function handlePointerMove(event) {
+    if (!session?.is_split) return;
+    const nextPosition = {
+      x: Math.min(event.clientX + 14, window.innerWidth - 340),
+      y: Math.min(event.clientY + 14, window.innerHeight - 100),
+    };
+    isVisibleRef.current = true;
+    setPosition(nextPosition);
+  }
+
+  function handlePointerLeave() {
+    isVisibleRef.current = false;
+    setPosition(null);
+  }
+
+  const tooltipTitle = "Single Continuous Session";
+  const tooltipText = `${formatSessionClock(session?.raw_started_at)} - ${formatSessionClock(session?.raw_ended_at)} (${formatDurationDetailed(session?.raw_duration_seconds)})`;
+
+  return (
+    <>
+      <div
+        className={`relative flex items-center justify-center shrink-0 ${session?.is_split ? "cursor-help group/line" : ""}`}
+        onPointerEnter={handlePointerMove}
+        onPointerMove={handlePointerMove}
+        onPointerLeave={handlePointerLeave}
+      >
+        {children}
+      </div>
+
+      {position && session?.is_split && typeof document !== "undefined"
+        ? createPortal(
             <div
-              className="about-tooltip-bubble"
+              className="fixed z-[9999] pointer-events-none bg-[#161616] text-[#ffffff] text-xs px-3.5 py-2.5 rounded-[14px] shadow-2xl border border-white/10 flex items-start gap-2.5 max-w-[320px]"
               style={{
                 left: `${position.x}px`,
                 top: `${position.y}px`,
               }}
             >
-              {summary}
+              <span className="w-2 h-2 rounded-full bg-[#8077ff] mt-1 shrink-0 shadow-[0_0_8px_rgba(128,119,255,0.6)]" />
+              <div>
+                <strong className="block text-[11px] font-bold text-white tracking-wide uppercase">
+                  {tooltipTitle}
+                </strong>
+                <span className="block text-[11px] text-gray-300 leading-relaxed mt-0.5">
+                  {tooltipText}
+                </span>
+              </div>
             </div>,
             document.body
           )
         : null}
+    </>
+  );
+}
+
+function SessionNoteTooltipAnchor({ note, children, onClick }) {
+  const [position, setPosition] = useState(null);
+
+  function handlePointerMove(event) {
+    if (!note) return;
+    const nextPosition = {
+      x: Math.min(event.clientX + 14, window.innerWidth - 330),
+      y: Math.min(event.clientY + 14, window.innerHeight - 140),
+    };
+    setPosition(nextPosition);
+  }
+
+  function handlePointerLeave() {
+    setPosition(null);
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onClick}
+        className="game-detail-note-text"
+        onPointerEnter={handlePointerMove}
+        onPointerMove={handlePointerMove}
+        onPointerLeave={handlePointerLeave}
+      >
+        {children}
+      </button>
+
+      {position && note && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="fixed z-[9999] pointer-events-none bg-[#161616] text-[#ffffff] text-xs px-3.5 py-2.5 rounded-[14px] shadow-2xl border border-white/10 flex items-start gap-2.5 max-w-[320px]"
+              style={{
+                left: `${position.x}px`,
+                top: `${position.y}px`,
+              }}
+            >
+              <NotebookIcon className="w-3.5 h-3.5 text-purple-400 mt-0.5 shrink-0" />
+              <div>
+                <strong className="block text-[11px] font-bold text-white tracking-wide uppercase">
+                  Session Note
+                </strong>
+                <span className="block text-[11px] text-gray-300 leading-relaxed mt-0.5 whitespace-pre-wrap break-words">
+                  {note}
+                </span>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
+    </>
+  );
+}
+
+function UserRatingReviewCard({ gameId, gameName, initialRating, initialReview, onUpdated }) {
+  const [rating, setRating] = useState(initialRating || null);
+  const [review, setReview] = useState(initialReview || "");
+  const [isEditing, setIsEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  useEffect(() => {
+    setRating(initialRating || null);
+    setReview(initialReview || "");
+  }, [initialRating, initialReview]);
+
+  async function executeSave() {
+    setShowConfirm(false);
+    setSaving(true);
+    try {
+      await invoke("update_game_user_rating_review", {
+        gameId,
+        userRating: rating,
+        userReview: review.trim() || null,
+      });
+      setIsEditing(false);
+      onUpdated?.();
+    } catch (err) {
+      console.error("Failed to save rating/review:", err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const hasData = Boolean(rating) || Boolean(review && review.trim());
+
+  return (
+    <div className="flex flex-col relative mb-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <FileTextIcon className="w-5 h-5 text-[#558467]" />
+          <h2 className="text-xl font-bold text-white tracking-tight">Review & Rating</h2>
+        </div>
+        {isEditing ? (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setRating(initialRating || null);
+                setReview(initialReview || "");
+                setIsEditing(false);
+              }}
+              disabled={saving}
+              className="rr-btn rr-btn-idle"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={executeSave}
+              disabled={saving}
+              className="rr-btn rr-btn-save"
+            >
+              <CheckIcon className="w-3.5 h-3.5" />
+              <span>{saving ? "Saving..." : "Save"}</span>
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setIsEditing(true)}
+            disabled={saving}
+            className="rr-btn rr-btn-idle"
+          >
+            <PencilIcon className="w-3.5 h-3.5" />
+            <span>{hasData ? "Edit Review" : "Add Review"}</span>
+          </button>
+        )}
+      </div>
+
+      <div className="space-y-4">
+        {isEditing ? (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-medium text-gray-400">Rating:</span>
+                <StarRating
+                  value={rating}
+                  onChange={(newVal) => setRating(newVal)}
+                  size="md"
+                  showLabel
+                  noShape
+                />
+              </div>
+              <span className={`text-[11px] font-mono ${review.length >= 2400 ? "text-amber-400 font-bold" : "text-gray-400"}`}>
+                {review.length} / 2500
+              </span>
+            </div>
+            <textarea
+              value={review}
+              onChange={(e) => setReview(e.target.value)}
+              maxLength={2500}
+              placeholder="// Write your review or personal notes here..."
+              rows={4}
+              className="w-full bg-[#161616] hover:bg-[#1f1f1f] focus:bg-[#1f1f1f] text-gray-300 text-sm font-mono rounded-r-[14px] rounded-l-none p-4 border-0 border-l-4 border-l-[#7068ff] outline-none resize-none transition-all placeholder:text-gray-600 shadow-md"
+            />
+          </div>
+        ) : (
+          hasData ? (
+            <div className="space-y-3">
+              {Boolean(rating) && (
+                <div className="flex items-center gap-3">
+                  <StarRating value={rating} readOnly size="md" showLabel noShape />
+                </div>
+              )}
+              {review && (
+                <div className="w-full bg-[#161616] hover:bg-[#1f1f1f] text-gray-400 text-sm leading-relaxed p-4 rounded-r-[14px] rounded-l-none border-0 border-l-4 border-l-[#7068ff] shadow-md font-mono whitespace-pre-wrap transition-colors">
+                  "{review}"
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="w-full bg-[#161616] hover:bg-[#1f1f1f] text-gray-500 text-sm font-mono p-4 rounded-r-[14px] rounded-l-none border-0 border-l-4 border-l-[#7068ff]/60 shadow-md select-none transition-colors">
+              // No review or personal notes saved yet.
+            </div>
+          )
+        )}
+      </div>
+
+      {/* Confirmation Modal using createPortal to mount directly on document.body to prevent blur leakage */}
+      {showConfirm &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fadeIn"
+            role="presentation"
+            onClick={() => setShowConfirm(false)}
+          >
+            <section
+              className="w-full max-w-[420px] bg-[#161616] text-[#ffffff] rounded-[14px] shadow-2xl p-5 relative border-0 space-y-4"
+              role="dialog"
+              aria-modal="true"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-2.5">
+                <StarIcon className="w-5 h-5 text-amber-400 shrink-0" fill="currentColor" />
+                <strong className="text-base font-bold text-white tracking-tight">Save Rating & Review?</strong>
+              </div>
+
+              <p className="text-sm text-gray-300 leading-relaxed">
+                Are you sure you want to save your rating and review for{" "}
+                <strong className="text-white font-semibold">{gameName || "this game"}</strong>?
+              </p>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  className="rr-btn rr-btn-lg rr-btn-idle cursor-pointer"
+                  onClick={() => setShowConfirm(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="rr-btn rr-btn-lg rr-btn-save cursor-pointer"
+                  onClick={executeSave}
+                  disabled={saving}
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </section>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
@@ -217,6 +510,7 @@ export default function GameDetailPage({
   const availableSessionYears = sessionYearGroups.map((group) => group.year);
   const [selectedSessionYear, setSelectedSessionYear] = useState("");
   const [openSessionMonths, setOpenSessionMonths] = useState([]);
+  const [activeJournalSession, setActiveJournalSession] = useState(null);
   const summary = String(game?.summary || "").trim() || "No description available for this game yet.";
   const genres = normalizeTextItems(detail?.genres);
   const platforms = normalizePlatformItems(detail?.platforms);
@@ -306,6 +600,16 @@ export default function GameDetailPage({
       observer.disconnect();
     };
   }, [shouldUseTitleLogo, game?.name, isTitleExpanded]);
+
+  async function reloadLocalData() {
+    try {
+      const nextDetail = await invoke("get_game_detail", { gameId });
+      setDetail(nextDetail);
+      await onRefreshLibrary?.();
+    } catch (nextError) {
+      console.error("Failed to reload local game detail:", nextError);
+    }
+  }
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -586,7 +890,16 @@ export default function GameDetailPage({
           </div>
         </div>
 
-        {/* 2. Activity Summary Section (Below Information Details) */}
+        {/* 2. User Rating & Personal Review Section (Below Information) */}
+        <UserRatingReviewCard
+          gameId={game?.id}
+          gameName={game?.name}
+          initialRating={detail?.user_rating ?? game?.user_rating}
+          initialReview={detail?.user_review ?? game?.user_review}
+          onUpdated={reloadLocalData}
+        />
+
+        {/* 3. Activity Summary Section (Below Review & Rating) */}
         <div className="flex flex-col">
           <div className="flex items-center gap-3 mb-6">
             <ClockIcon className="w-5 h-5 text-[#558467]" />
@@ -690,22 +1003,33 @@ export default function GameDetailPage({
                               <th className="game-detail-session-head-date">Date</th>
                               <th className="game-detail-session-head-range">Session</th>
                               <th className="game-detail-session-head-duration">Duration</th>
+                              <th className="game-detail-session-head-note">Note</th>
                               <th className="game-detail-session-head-total">Playtime</th>
                             </tr>
                           </thead>
                           {month.days.map((day) => (
                             <tbody key={day.key} className="game-detail-session-day-group">
                               {day.sessions.map((session, index) => (
-                                <tr key={`${day.key}-${session.started_at}-${index}`} className="game-detail-session-row">
+                                <tr key={`${day.key}-${session.started_at}-${index}`} className="game-detail-session-row group">
                                   {index === 0 ? (
                                     <td className="game-detail-session-date" rowSpan={day.sessions.length}>
                                       {day.label}
                                     </td>
                                   ) : null}
                                   <td className="game-detail-session-range">
-                                    <div className="game-detail-session-range-main">
-                                      <span className="game-detail-session-dot" />
+                                    <div className="game-detail-session-range-main flex items-center gap-2 flex-wrap">
+                                      <SessionConnectorTooltipAnchor session={session}>
+                                        {session.is_split && session.split_index === 1 && (
+                                          <span className="absolute top-1/2 left-1/2 -translate-x-1/2 w-[3px] h-[32px] bg-gradient-to-b from-[#8077ff] to-[#8077ff]/30 z-10 group-hover/line:bg-[#a39cff] transition-all pointer-events-none" />
+                                        )}
+                                        {session.is_split && session.split_index === 0 && (
+                                          <span className="absolute bottom-1/2 left-1/2 -translate-x-1/2 w-[3px] h-[32px] bg-gradient-to-t from-[#8077ff] to-[#8077ff]/30 z-10 group-hover/line:bg-[#a39cff] transition-all pointer-events-none" />
+                                        )}
+                                        <span className="game-detail-session-dot relative z-20" />
+                                      </SessionConnectorTooltipAnchor>
+
                                       <span>{formatSessionClock(session.started_at)} - {session.ended_at ? formatSessionClock(session.ended_at) : "Now"}</span>
+
                                       {session.is_active ? <em>Active</em> : null}
                                     </div>
                                   </td>
@@ -714,6 +1038,24 @@ export default function GameDetailPage({
                                       <ClockIcon />
                                       <span>{formatDurationDetailed(session.duration_seconds || 0)}</span>
                                     </div>
+                                  </td>
+                                  <td className="game-detail-session-note">
+                                    {session.note ? (
+                                      <SessionNoteTooltipAnchor
+                                        note={session.note}
+                                        onClick={() => setActiveJournalSession(session)}
+                                      >
+                                        <span className="truncate block max-w-full">{session.note}</span>
+                                      </SessionNoteTooltipAnchor>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => setActiveJournalSession(session)}
+                                        className="hidden group-hover:inline-flex session-note-btn session-note-btn-add"
+                                      >
+                                        + Note
+                                      </button>
+                                    )}
                                   </td>
                                   {index === 0 ? (
                                     <td className="game-detail-session-total-cell" rowSpan={day.sessions.length}>
@@ -737,6 +1079,22 @@ export default function GameDetailPage({
           )}
         </section>
       </div>
+
+      {/* Post Session Journal Modal for editing session notes */}
+      {activeJournalSession && (
+        <PostSessionJournalModal
+          isOpen={Boolean(activeJournalSession)}
+          onClose={() => setActiveJournalSession(null)}
+          session={activeJournalSession}
+          game={{
+            id: game?.id || detail?.id || gameId,
+            name: game?.name || detail?.name || "Game",
+            user_rating: detail?.user_rating ?? game?.user_rating,
+            user_review: detail?.user_review ?? game?.user_review,
+          }}
+          onSaved={reloadLocalData}
+        />
+      )}
     </div>
   );
 }
@@ -1005,9 +1363,13 @@ function splitSessionAcrossDays(session) {
 
     const reachesAnotherDay = segmentEnd < effectiveEnd;
     segments.push({
+      id: session?.id,
+      note: session?.note || null,
       started_at: currentStart,
       ended_at: currentStart + segmentDuration,
       duration_seconds: segmentDuration,
+      raw_started_at: start,
+      raw_ended_at: effectiveEnd,
       is_active: Boolean(session?.is_active) && segmentEnd >= effectiveEnd,
       range_start_label: formatSessionClock(currentStart),
       range_end_label: reachesAnotherDay ? "23.59" : formatSessionClock(currentStart + segmentDuration),
@@ -1017,7 +1379,27 @@ function splitSessionAcrossDays(session) {
     remaining -= segmentDuration;
   }
 
-  return segments;
+  const isSplit = segments.length > 1;
+  return segments.map((seg, index) => ({
+    ...seg,
+    is_split: isSplit,
+    split_index: index,
+    split_total: segments.length,
+    raw_started_at: start,
+    raw_ended_at: effectiveEnd,
+    raw_duration_seconds: totalDuration,
+  }));
+}
+
+function isCrossMidnightSession(session) {
+  if (!session) return false;
+  const startTs = Number(session.raw_started_at || session.started_at || 0);
+  const endTs = Number(session.raw_ended_at || session.ended_at || 0);
+  if (startTs <= 0 || endTs <= 0 || endTs <= startTs) return false;
+
+  const startDate = new Date(startTs * 1000).toDateString();
+  const endDate = new Date(endTs * 1000).toDateString();
+  return startDate !== endDate;
 }
 
 function localMidnightTimestamp(timestamp) {

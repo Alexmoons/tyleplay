@@ -511,3 +511,22 @@ export function formatCurrentWeekRangeLabel() {
 
   return `${mondayDayName}, ${formatDate(monday)} – ${sundayDayName}, ${formatDate(sunday)}`;
 }
+
+export function formatSessionDay(timestamp) {
+  if (!timestamp) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(Number(timestamp) * 1000));
+}
+
+export function formatSessionClock(timestamp) {
+  if (!timestamp) return "";
+  return new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(Number(timestamp) * 1000)).replace(":", ".");
+}
