@@ -1183,6 +1183,11 @@ function App() {
   }
 
   async function handleDeleteGame(gameId) {
+    const numericGameId = Number(gameId || 0);
+    if (!numericGameId) return false;
+
+    const targetGame = library.find((g) => Number(g.id) === numericGameId) || (Number(selectedGameId) === numericGameId ? selectedGame : null);
+    const label = targetGame?.name || "this game";
 
     setConfirmState({
       title: "Delete Game",

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   buildPosterPresentationStyle,
   formatDurationLong,
@@ -9,6 +10,83 @@ import {
   resolveSteamLibraryHeaderMediaCandidates,
 } from "../lib/game-helpers";
 import { MoreIcon, PencilIcon, PlayIcon, StarIcon, StatusIcon, TrashIcon } from "./icons";
+
+function GameCardMoreMenuPortal({ isOpen, buttonRef, onClose, onEdit, onDelete }) {
+  const [coords, setCoords] = useState(null);
+
+  useEffect(() => {
+    if (!isOpen || !buttonRef?.current) {
+      setCoords(null);
+      return;
+    }
+
+    function updateCoords() {
+      if (!buttonRef?.current) return;
+      const rect = buttonRef.current.getBoundingClientRect();
+      const menuWidth = 132;
+      const menuHeight = 68;
+
+      let left = Math.max(10, rect.right - menuWidth);
+      let top = rect.bottom + 4;
+
+      if (top + menuHeight > window.innerHeight - 10) {
+        top = Math.max(10, rect.top - menuHeight - 4);
+      }
+
+      setCoords({ left, top });
+    }
+
+    updateCoords();
+    window.addEventListener("scroll", updateCoords, true);
+    window.addEventListener("resize", updateCoords);
+    return () => {
+      window.removeEventListener("scroll", updateCoords, true);
+      window.removeEventListener("resize", updateCoords);
+    };
+  }, [isOpen, buttonRef]);
+
+  if (!isOpen || !coords || typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      className="fixed z-[99999] min-w-[132px] w-max p-1.5 rounded-[14px] bg-[#161616] border-0 shadow-2xl flex flex-col gap-1 pointer-events-auto"
+      style={{
+        left: `${coords.left}px`,
+        top: `${coords.top}px`,
+      }}
+      role="menu"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        className="game-card-menu-item"
+        onClick={(event) => {
+          event.stopPropagation();
+          onClose();
+          onEdit?.();
+        }}
+      >
+        <PencilIcon />
+        <span>Edit Info</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className="game-card-menu-item is-danger"
+        onClick={async (event) => {
+          event.stopPropagation();
+          onClose();
+          await onDelete?.();
+        }}
+      >
+        <TrashIcon />
+        <span>Delete Game</span>
+      </button>
+    </div>,
+    document.body
+  );
+}
 
 export default function LibraryGameCard({
   game,
@@ -25,10 +103,11 @@ export default function LibraryGameCard({
   const storeBadgeLabel = formatStoreBadgeLabel(game.store);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const rootRef = useRef(null);
+  const buttonRef = useRef(null);
 
   useEffect(() => {
     function handlePointerDown(event) {
-      if (!rootRef.current?.contains(event.target)) {
+      if (!rootRef.current?.contains(event.target) && !buttonRef.current?.contains(event.target)) {
         setIsMenuOpen(false);
       }
     }
@@ -147,8 +226,9 @@ export default function LibraryGameCard({
               <span>{formatDurationLong(game.total_seconds || 0)}</span>
             </span>
             <button
+              ref={buttonRef}
               type="button"
-              className="p-0.5 text-[#c3d7d2] hover:text-white transition-colors drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]"
+              className="p-0.5 text-[#c3d7d2] hover:text-white transition-colors drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)] cursor-pointer"
               onClick={(event) => {
                 event.stopPropagation();
                 event.preventDefault();
@@ -161,37 +241,13 @@ export default function LibraryGameCard({
         </div>
       </div>
 
-      {isMenuOpen && (
-        <div 
-          className="game-card-menu right-2 bottom-12 animate-fade-in"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            type="button"
-            className="game-card-menu-item"
-            onClick={(event) => {
-              event.stopPropagation();
-              setIsMenuOpen(false);
-              onEdit?.();
-            }}
-          >
-            <PencilIcon />
-            <span>Edit Info</span>
-          </button>
-          <button
-            type="button"
-            className="game-card-menu-item is-danger"
-            onClick={async (event) => {
-              event.stopPropagation();
-              setIsMenuOpen(false);
-              await onDelete?.();
-            }}
-          >
-            <TrashIcon />
-            <span>Delete Game</span>
-          </button>
-        </div>
-      )}
+      <GameCardMoreMenuPortal
+        isOpen={isMenuOpen}
+        buttonRef={buttonRef}
+        onClose={() => setIsMenuOpen(false)}
+        onEdit={onEdit}
+        onDelete={onDelete}
+      />
     </article>
   );
 }
@@ -213,6 +269,7 @@ function RowLibraryGameCard({
   const [sourceIndex, setSourceIndex] = useState(0);
   const currentMedia = mediaCandidates[sourceIndex] || "";
   const lastPlayed = formatLastPlayed(game.finished_last_played || game.last_played);
+  const buttonRef = useRef(null);
 
   useEffect(() => {
     setSourceIndex(0);
@@ -279,8 +336,9 @@ function RowLibraryGameCard({
                 <StarIcon className={isFavorite ? "fill-amber-400 text-amber-400" : ""} />
               </button>
               <button
+                ref={buttonRef}
                 type="button"
-                className="game-more game-more-list"
+                className="game-more game-more-list cursor-pointer"
                 aria-label={`More actions for ${game.name}`}
                 aria-haspopup="menu"
                 aria-expanded={isMenuOpen}
@@ -308,42 +366,13 @@ function RowLibraryGameCard({
         </div>
       </div>
 
-      {isMenuOpen ? (
-        <div
-          className="game-card-menu right-2 top-12"
-          role="menu"
-          onClick={(event) => {
-            event.stopPropagation();
-          }}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            className="game-card-menu-item"
-            onClick={(event) => {
-              event.stopPropagation();
-              setIsMenuOpen(false);
-              onEdit?.();
-            }}
-          >
-            <PencilIcon />
-            <span>Edit Info</span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="game-card-menu-item is-danger"
-            onClick={async (event) => {
-              event.stopPropagation();
-              setIsMenuOpen(false);
-              await onDelete?.();
-            }}
-          >
-            <TrashIcon />
-            <span>Delete Game</span>
-          </button>
-        </div>
-      ) : null}
+      <GameCardMoreMenuPortal
+        isOpen={isMenuOpen}
+        buttonRef={buttonRef}
+        onClose={() => setIsMenuOpen(false)}
+        onEdit={onEdit}
+        onDelete={onDelete}
+      />
     </article>
   );
 }

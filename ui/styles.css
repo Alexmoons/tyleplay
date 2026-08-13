@@ -7515,16 +7515,18 @@ img {
   padding: 0.35rem;
   border-radius: 14px;
   background: #161616;
-  border: 0;
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
   display: grid;
   gap: 0.12rem;
-  z-index: 30;
+  z-index: 200 !important;
+  bottom: auto !important;
+  height: auto !important;
 }
 
 .game-card-menu-item {
   width: 100%;
-  min-height: 30px;
+  min-height: 28px;
   padding: 0.35rem 0.65rem;
   display: flex;
   align-items: center;
@@ -7533,7 +7535,7 @@ img {
   background: transparent;
   border: 0;
   border-radius: 8px;
-  font-size: 0.83rem;
+  font-size: 0.78rem;
   font-weight: 500;
   white-space: nowrap;
   text-align: left;
@@ -7550,16 +7552,16 @@ img {
 }
 
 .game-card-menu-item:hover {
-  color: #ffffff;
-  background: rgba(112, 104, 255, 0.18);
+  color: #ffffff !important;
+  background: rgba(112, 104, 255, 0.28) !important;
 }
 
 .game-card-menu-item:hover svg {
-  color: #a8a2ff;
+  color: #a8a2ff !important;
 }
 
 .game-card-menu-item.is-danger {
-  color: #ffffff;
+  color: #ef4444;
 }
 
 .game-card-menu-item.is-danger svg {
@@ -7567,12 +7569,12 @@ img {
 }
 
 .game-card-menu-item.is-danger:hover {
-  color: #ffffff;
-  background: rgba(239, 68, 68, 0.18);
+  color: #ffffff !important;
+  background: rgba(239, 68, 68, 0.28) !important;
 }
 
 .game-card-menu-item.is-danger:hover svg {
-  color: #fca5a5;
+  color: #fca5a5 !important;
 }
 
 .action-button svg {
@@ -7634,6 +7636,12 @@ img {
   content-visibility: auto;
   contain: layout paint style;
   contain-intrinsic-size: 104px;
+}
+
+.game-card-list.is-menu-open {
+  overflow: visible !important;
+  z-index: 100 !important;
+  contain: none !important;
 }
 
 .game-card-list:hover {
@@ -7782,8 +7790,12 @@ img {
 }
 
 .game-card-menu-list {
-  right: 0.8rem;
-  bottom: 0.8rem;
+  position: absolute !important;
+  right: 0.75rem !important;
+  top: 2.6rem !important;
+  bottom: auto !important;
+  height: auto !important;
+  z-index: 200 !important;
 }
 
 .game-poster-wrap {
@@ -7997,56 +8009,6 @@ img {
 .game-more:hover {
   color: #fff;
   background: rgba(255, 255, 255, 0.1);
-}
-
-.game-card-menu {
-  position: absolute;
-  right: 0.6rem;
-  bottom: 0.75rem;
-  z-index: 5;
-  min-width: 132px;
-  padding: 0.24rem;
-  display: grid;
-  gap: 0.14rem;
-  border-radius: 9px;
-  background: rgba(14, 18, 27, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 18px 32px rgba(0, 0, 0, 0.34);
-  backdrop-filter: blur(18px);
-}
-
-.game-card-menu button {
-  min-height: 30px;
-  padding: 0.42rem 0.52rem;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.42rem;
-  color: #e4e9f7;
-  background: transparent;
-  border: 0;
-  border-radius: 7px;
-  cursor: pointer;
-  text-align: left;
-  font-size: 0.9rem;
-  transition: background 180ms ease, color 180ms ease;
-}
-
-.game-card-menu button svg {
-  width: 13px;
-  height: 13px;
-}
-
-.game-card-menu button:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.game-card-menu button.is-danger {
-  color: #ffb8ac;
-}
-
-.game-card-menu button.is-danger:hover {
-  color: #ffd7d0;
-  background: rgba(183, 66, 55, 0.18);
 }
 
 .library-empty {

@@ -15,6 +15,7 @@ import { invoke, toAssetUrl } from "../lib/tauri";
 import {
   ArrowLeftIcon,
   CalendarIcon,
+  CheckIcon,
   ChevronDownIcon,
   ClockIcon,
   ExportIcon,
@@ -93,10 +94,10 @@ function AboutTooltipSection({ summary }) {
 
   return (
     <div className="mb-5 w-full">
-      <h3 className="text-[11px] font-black text-gray-400 uppercase tracking-widest mb-1.5">ABOUT</h3>
+      <h3 className="text-[11px] font-black text-gray-300 uppercase tracking-widest mb-1.5">ABOUT</h3>
       <p
         ref={textRef}
-        className="text-gray-300 text-sm leading-relaxed drop-shadow-md opacity-90 line-clamp-3 cursor-default"
+        className="text-gray-100 text-sm leading-relaxed drop-shadow-md line-clamp-3 cursor-default"
         onPointerEnter={handlePointerMove}
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
@@ -237,15 +238,17 @@ function SessionNoteTooltipAnchor({ note, children, onClick }) {
 
 function UserRatingReviewCard({ gameId, gameName, initialRating, initialReview, onUpdated }) {
   const [rating, setRating] = useState(initialRating || null);
-  const [review, setReview] = useState(initialReview || "");
+  const [review, setReview] = useState(() => String(initialReview || ""));
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     setRating(initialRating || null);
-    setReview(initialReview || "");
+    setReview(String(initialReview || ""));
   }, [initialRating, initialReview]);
+
+  const safeReview = String(review || "");
 
   async function executeSave() {
     setShowConfirm(false);
@@ -254,7 +257,7 @@ function UserRatingReviewCard({ gameId, gameName, initialRating, initialReview, 
       await invoke("update_game_user_rating_review", {
         gameId,
         userRating: rating,
-        userReview: review.trim() || null,
+        userReview: safeReview.trim() || null,
       });
       setIsEditing(false);
       onUpdated?.();
@@ -265,14 +268,14 @@ function UserRatingReviewCard({ gameId, gameName, initialRating, initialReview, 
     }
   }
 
-  const hasData = Boolean(rating) || Boolean(review && review.trim());
+  const hasData = Boolean(rating) || Boolean(safeReview.trim());
 
   return (
     <div className="flex flex-col relative mb-6">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <FileTextIcon className="w-5 h-5 text-[#558467]" />
-          <h2 className="text-xl font-bold text-white tracking-tight">Review & Rating</h2>
+          <h2 className="text-xl font-bold text-white tracking-tight">Rating & Review</h2>
         </div>
         {isEditing ? (
           <div className="flex items-center gap-2">
@@ -280,7 +283,7 @@ function UserRatingReviewCard({ gameId, gameName, initialRating, initialReview, 
               type="button"
               onClick={() => {
                 setRating(initialRating || null);
-                setReview(initialReview || "");
+                setReview(String(initialReview || ""));
                 setIsEditing(false);
               }}
               disabled={saving}
@@ -325,12 +328,12 @@ function UserRatingReviewCard({ gameId, gameName, initialRating, initialReview, 
                   noShape
                 />
               </div>
-              <span className={`text-[11px] font-mono ${review.length >= 2400 ? "text-amber-400 font-bold" : "text-gray-400"}`}>
-                {review.length} / 2500
+              <span className={`text-[11px] font-mono ${safeReview.length >= 2400 ? "text-amber-400 font-bold" : "text-gray-400"}`}>
+                {safeReview.length} / 2500
               </span>
             </div>
             <textarea
-              value={review}
+              value={safeReview}
               onChange={(e) => setReview(e.target.value)}
               maxLength={2500}
               placeholder="// Write your review or personal notes here..."
@@ -346,9 +349,9 @@ function UserRatingReviewCard({ gameId, gameName, initialRating, initialReview, 
                   <StarRating value={rating} readOnly size="md" showLabel noShape />
                 </div>
               )}
-              {review && (
+              {safeReview && (
                 <div className="w-full bg-[#161616] hover:bg-[#1f1f1f] text-gray-400 text-sm leading-relaxed p-4 rounded-r-[14px] rounded-l-none border-0 border-l-4 border-l-[#7068ff] shadow-md font-mono whitespace-pre-wrap transition-colors">
-                  "{review}"
+                  "{safeReview}"
                 </div>
               )}
             </div>
