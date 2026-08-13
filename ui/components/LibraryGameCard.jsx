@@ -507,26 +507,68 @@ function getStatusIconBgClass(status) {
 
 function CardStatusDropdown({ gameId, currentStatus, hasPlaytime, onUpdateStatus }) {
   const [isOpen, setIsOpen] = useState(false);
-  const rootRef = useRef(null);
+  const [coords, setCoords] = useState(null);
+  const buttonRef = useRef(null);
+  const panelRef = useRef(null);
 
   useEffect(() => {
+    if (!isOpen || !buttonRef?.current) {
+      setCoords(null);
+      return;
+    }
+
+    function updateCoords() {
+      if (!buttonRef?.current) return;
+      const rect = buttonRef.current.getBoundingClientRect();
+      const menuWidth = 140;
+      const menuHeight = 165;
+
+      let left = Math.max(10, rect.right - menuWidth);
+      let top = rect.bottom + 4;
+
+      if (top + menuHeight > window.innerHeight - 10) {
+        top = Math.max(10, rect.top - menuHeight - 4);
+      }
+
+      setCoords({ left, top });
+    }
+
+    updateCoords();
+    window.addEventListener("scroll", updateCoords, true);
+    window.addEventListener("resize", updateCoords);
+    return () => {
+      window.removeEventListener("scroll", updateCoords, true);
+      window.removeEventListener("resize", updateCoords);
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
     function handlePointerDown(event) {
-      if (!rootRef.current?.contains(event.target)) {
+      if (
+        buttonRef.current &&
+        !buttonRef.current.contains(event.target) &&
+        panelRef.current &&
+        !panelRef.current.contains(event.target)
+      ) {
         setIsOpen(false);
       }
     }
+
     function handleEscape(event) {
       if (event.key === "Escape") {
         setIsOpen(false);
       }
     }
+
     document.addEventListener("mousedown", handlePointerDown);
     document.addEventListener("keydown", handleEscape);
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
       document.removeEventListener("keydown", handleEscape);
     };
-  }, []);
+  }, [isOpen]);
 
   const isBacklogAvailable = currentStatus === "Backlog" && !hasPlaytime;
   const options = isBacklogAvailable
@@ -542,8 +584,9 @@ function CardStatusDropdown({ gameId, currentStatus, hasPlaytime, onUpdateStatus
   }
 
   return (
-    <div ref={rootRef} className="relative inline-block">
+    <div className="relative inline-block">
       <button
+        ref={buttonRef}
         type="button"
         className={`status-icon-btn ${getStatusIconBgClass(currentStatus)}`}
         title={`Status: ${currentStatus || "Backlog"} (Click to change)`}
@@ -556,30 +599,38 @@ function CardStatusDropdown({ gameId, currentStatus, hasPlaytime, onUpdateStatus
         <StatusIcon status={currentStatus || "Backlog"} className="w-3.5 h-3.5" />
       </button>
 
-      {isOpen ? (
-        <div
-          className="card-status-dropdown-panel"
-          onClick={(event) => {
-            event.stopPropagation();
-          }}
-        >
-          {options.map((option) => {
-            const isSelected = option === currentStatus;
-            return (
-              <button
-                key={option}
-                type="button"
-                data-status={option}
-                className={`card-status-dropdown-item${isSelected ? " is-selected" : ""}`}
-                onClick={(event) => handleSelect(event, option)}
-              >
-                <StatusIcon status={option} className="w-3.2 h-3.2 shrink-0" />
-                <span>{option}</span>
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
+      {isOpen && coords && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              ref={panelRef}
+              className="card-status-dropdown-panel is-portal fixed z-[99999] pointer-events-auto"
+              style={{
+                left: `${coords.left}px`,
+                top: `${coords.top}px`,
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+              }}
+            >
+              {options.map((option) => {
+                const isSelected = option === currentStatus;
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    data-status={option}
+                    className={`card-status-dropdown-item${isSelected ? " is-selected" : ""}`}
+                    onClick={(event) => handleSelect(event, option)}
+                  >
+                    <StatusIcon status={option} className="w-3.2 h-3.2 shrink-0" />
+                    <span>{option}</span>
+                  </button>
+                );
+              })}
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 }

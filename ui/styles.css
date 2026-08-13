@@ -11980,16 +11980,22 @@ body[data-theme="light"] .theme-switch-option.is-active {
   right: 0;
   top: 100%;
   margin-top: 4px;
-  z-index: 60;
+  z-index: 99999;
   min-width: 135px;
-  padding: 3px;
+  padding: 4px;
   background-color: #161616 !important;
-  border-radius: 12px;
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.8);
+  border: 0 !important;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
+}
+
+.card-status-dropdown-panel.is-portal {
+  position: fixed !important;
+  right: auto !important;
+  margin-top: 0 !important;
 }
 
 .card-status-dropdown-item {
@@ -11997,12 +12003,12 @@ body[data-theme="light"] .theme-switch-option.is-active {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 8px;
+  padding: 6px 10px;
   font-size: 0.71rem;
   font-weight: 600;
   text-align: left;
-  color: #d1d5db;
-  border-radius: 6px;
+  color: #ffffff;
+  border-radius: 8px;
   border: none;
   background: transparent;
   cursor: pointer;
