@@ -18,24 +18,24 @@ TylePlay is a desktop application for tracking gaming sessions.
     <th colspan="2" align="center">Library</th>
   </tr>
   <tr>
-    <td align="center"><img src="./src/screenshots/tp2.png" alt="Library"  /></td>
-    <td align="center"><img src="./src/screenshots/tp4.png" alt="Library 2" /></td>
+    <td align="center"><img src="./src/screenshots/tp19.png" alt="Library"  /></td>
+    <td align="center"><img src="./src/screenshots/tp20.png" alt="Library 2" /></td>
   </tr>
 
   <tr>
     <th colspan="2" align="center">Library</th>
   </tr>
   <tr>
-    <td align="center"><img src="./src/screenshots/tp3.png" alt="Library 3"  /></td>
-    <td align="center"><img src="./src/screenshots/tp5.png" alt="Library 4" /></td>
+    <td align="center"><img src="./src/screenshots/tp21.png" alt="Library 3"  /></td>
+    <td align="center"><img src="./src/screenshots/tp22.png" alt="Library 4" /></td>
   </tr>
 
   <tr>
     <th colspan="2" align="center">Library</th>
   </tr>
   <tr>
-    <td align="center"><img src="./src/screenshots/tp6.png" alt="Library 5"  /></td>
-    <td align="center"><img src="./src/screenshots/tp7.png" alt="Library 6" /></td>
+    <td align="center"><img src="./src/screenshots/tp23.png" alt="Library 5"  /></td>
+    <td align="center"><img src="./src/screenshots/tp24.png" alt="Library 6" /></td>
   </tr>
 
   <tr>
