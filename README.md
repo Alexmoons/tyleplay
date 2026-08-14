@@ -1,10 +1,12 @@
 # **TylePlay**
 ---
-TylePlay is a desktop application for tracking gaming sessions.
+TylePlay is a desktop application for tracking gaming sessions. All application data is stored locally.
 
 <p align="center">
   <img src="src/picture/tyleplay2.png" alt="TylePlay Logo" width="200"/>
 </p>
+
+Database Location: ```%APPDATA%\com.artyle.tyleplay```
 
 > Only supports tracking native PC game executable files (`.exe`). Game emulators and non-executable launchers are not supported yet.
 ---
