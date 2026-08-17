@@ -6406,11 +6406,12 @@ fn scan_gog_games() -> Vec<(String, PathBuf, Option<PathBuf>)> {
     // Tier 2: Scan Windows Registry GOG entries
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
         let ps_cmd = "Get-ItemProperty 'HKLM:\\SOFTWARE\\WOW6432Node\\GOG.com\\Games\\*', 'HKLM:\\SOFTWARE\\GOG.com\\Games\\*' -ErrorAction SilentlyContinue | Select-Object gameName, path, workingDir, exe | ConvertTo-Json";
-        if let Ok(output) = Command::new("powershell")
-            .args(["-NoProfile", "-Command", ps_cmd])
-            .output()
-        {
+        let mut cmd = Command::new("powershell");
+        cmd.args(["-NoProfile", "-Command", ps_cmd]);
+        cmd.creation_flags(0x08000000);
+        if let Ok(output) = cmd.output() {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let parsed: Result<serde_json::Value, _> = serde_json::from_str(&stdout);
@@ -7576,8 +7577,10 @@ fn open_external_url(url: String) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
         Command::new("cmd")
             .args(["/C", "start", "", trimmed])
+            .creation_flags(0x08000000)
             .spawn()
             .map_err(|err| err.to_string())?;
         return Ok(());
@@ -8104,11 +8107,13 @@ fn save_user_settings(
 
 #[cfg(target_os = "windows")]
 fn launch_game_with_elevation(exe_path: &str) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
     let escaped_path = exe_path.replace('\'', "''");
     let command = format!("Start-Process -FilePath '{}' -Verb RunAs", escaped_path);
 
     Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", &command])
+        .creation_flags(0x08000000)
         .spawn()
         .map_err(|err| format!("failed to launch elevated game: {err}"))?;
 
@@ -8532,6 +8537,7 @@ fn window_close(app: tauri::AppHandle) -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 fn register_windows_aumid_and_shortcut() {
+    use std::os::windows::process::CommandExt;
     let app_id_str = "com.artyle.tyleplay";
     let app_id_u16: Vec<u16> = format!("{app_id_str}\0").encode_utf16().collect();
     unsafe {
@@ -8554,6 +8560,7 @@ fn register_windows_aumid_and_shortcut() {
         );
         let _ = std::process::Command::new("powershell")
             .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &ps_code])
+            .creation_flags(0x08000000)
             .spawn();
     }
 }
