@@ -58,47 +58,57 @@ export function buildRangeLabel(total, page, pageSize) {
   return `Showing ${start}-${end}`;
 }
 
-export function buildPaginationItems(currentPage, totalPages, edgeCount = 3) {
-  const safeCurrentPage = Math.max(1, Number(currentPage || 1));
+export function buildPaginationItems(currentPage, totalPages) {
   const safeTotalPages = Math.max(1, Number(totalPages || 1));
-  const safeEdgeCount = Math.max(1, Number(edgeCount || 1));
+  const safeCurrentPage = Math.max(1, Math.min(Number(currentPage || 1), safeTotalPages));
 
-  if (safeTotalPages <= safeEdgeCount * 2) {
+  if (safeTotalPages <= 7) {
     return Array.from({ length: safeTotalPages }, (_, index) => ({
       type: "page",
       value: index + 1,
     }));
   }
 
-  const items = [];
-  const addPage = (value) => {
-    if (!items.some((item) => item.type === "page" && item.value === value)) {
-      items.push({ type: "page", value });
-    }
-  };
-  const addEllipsis = (key) => {
-    if (items[items.length - 1]?.type !== "ellipsis") {
-      items.push({ type: "ellipsis", key });
-    }
-  };
+  const showLeftEllipsis = safeCurrentPage > 4;
+  const showRightEllipsis = safeCurrentPage < safeTotalPages - 3;
 
-  const currentBlockStart = Math.max(1, safeCurrentPage - safeEdgeCount + 1);
-  const currentBlockEnd = Math.min(safeTotalPages, currentBlockStart + safeEdgeCount - 1);
-  const trailingBlockStart = Math.max(1, safeTotalPages - safeEdgeCount + 1);
-
-  for (let page = currentBlockStart; page <= currentBlockEnd; page += 1) {
-    addPage(page);
+  if (!showLeftEllipsis && showRightEllipsis) {
+    const leftRange = [1, 2, 3, 4, 5];
+    return [
+      ...leftRange.map((value) => ({ type: "page", value })),
+      { type: "ellipsis", key: "right" },
+      { type: "page", value: safeTotalPages },
+    ];
   }
 
-  if (currentBlockEnd + 1 < trailingBlockStart) {
-    addEllipsis("middle");
+  if (showLeftEllipsis && !showRightEllipsis) {
+    const rightRange = [
+      safeTotalPages - 4,
+      safeTotalPages - 3,
+      safeTotalPages - 2,
+      safeTotalPages - 1,
+      safeTotalPages,
+    ];
+    return [
+      { type: "page", value: 1 },
+      { type: "ellipsis", key: "left" },
+      ...rightRange.map((value) => ({ type: "page", value })),
+    ];
   }
 
-  for (let page = trailingBlockStart; page <= safeTotalPages; page += 1) {
-    addPage(page);
-  }
+  const middleRange = [
+    safeCurrentPage - 1,
+    safeCurrentPage,
+    safeCurrentPage + 1,
+  ];
 
-  return items;
+  return [
+    { type: "page", value: 1 },
+    { type: "ellipsis", key: "left" },
+    ...middleRange.map((value) => ({ type: "page", value })),
+    { type: "ellipsis", key: "right" },
+    { type: "page", value: safeTotalPages },
+  ];
 }
 
 export function preventPagerFocus(event) {

@@ -17,6 +17,7 @@ import {
 import WindowTitlebar from "./components/WindowTitlebar";
 import Sidebar from "./components/Sidebar";
 import AddGameModal from "./components/AddGameModal";
+import AutoScanModal from "./components/AutoScanModal";
 import LoadingIndicator from "./components/LoadingIndicator";
 import { CheckCircleIcon, CloseIcon, InfoCircleIcon, RefreshIcon, WarningTriangleIcon } from "./components/icons";
 import ArchivePage from "./pages/ArchivePage";
@@ -318,6 +319,7 @@ function App() {
   }
 
   const [isAddGameOpen, setIsAddGameOpen] = useState(false);
+  const [isAutoScanOpen, setIsAutoScanOpen] = useState(false);
   const [appNotices, setAppNotices] = useState([]);
   const [restoringArchiveId, setRestoringArchiveId] = useState(null);
   const [deletingArchiveId, setDeletingArchiveId] = useState(null);
@@ -1647,6 +1649,17 @@ function App() {
                   open={isAddGameOpen}
                   onClose={() => setIsAddGameOpen(false)}
                   onAdded={handleAddGameAdded}
+                  onNotify={pushAppNotice}
+                  onOpenAutoScan={() => {
+                    setIsAddGameOpen(false);
+                    setIsAutoScanOpen(true);
+                  }}
+                />
+
+                <AutoScanModal
+                  open={isAutoScanOpen}
+                  onClose={() => setIsAutoScanOpen(false)}
+                  onImported={handleAddGameAdded}
                   onNotify={pushAppNotice}
                 />
               </div>

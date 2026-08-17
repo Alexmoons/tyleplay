@@ -21,7 +21,7 @@ import {
   TrophyIcon,
 } from "../components/icons";
 
-const KNOWN_STORES = ["Steam", "Epic Games", "GOG", "Microsoft Store", "PlayStation", "Rockstar", "EA App", "Ubisoft Connect"];
+const KNOWN_STORES = ["Steam", "Epic Games", "GOG", "Microsoft Store", "Rockstar", "EA App", "Ubisoft Connect"];
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const CHART_MODE_OPTIONS = [
@@ -1855,8 +1855,6 @@ function normalizeStoreLabel(value) {
     ["microsoft store", "Microsoft Store"],
     ["ms store", "Microsoft Store"],
     ["xbox app", "Microsoft Store"],
-    ["playstation", "PlayStation"],
-    ["ps", "PlayStation"],
     ["rockstar", "Rockstar"],
     ["rockstar games", "Rockstar"],
     ["ea", "EA App"],

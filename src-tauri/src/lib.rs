@@ -7,7 +7,7 @@ use std::{
     env,
     fs,
     fs::OpenOptions,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex, TryLockError},
@@ -20,6 +20,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, RunEvent, WindowEvent, RESTART_EXIT_CODE,
 };
+use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const TRAY_ID: &str = "main-tray";
 const TRAY_MENU_TITLE_MAX_CHARS: usize = 24;
@@ -755,7 +756,6 @@ fn normalize_store(value: Option<String>) -> Option<String> {
         "epic" | "epic games" | "epic games store" => "Epic Games",
         "gog" | "gog.com" => "GOG",
         "microsoft" | "microsoft store" | "ms store" | "xbox app" => "Microsoft Store",
-        "playstation" | "ps" => "PlayStation",
         "rockstar" | "rockstar games" => "Rockstar",
         "ea" | "ea app" | "origin" => "EA App",
         "ubisoft" | "ubisoft connect" | "uplay" => "Ubisoft Connect",
@@ -5857,6 +5857,871 @@ fn search_igdb_games(
         .collect())
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScannedGame {
+    pub id: String,
+    pub name: String,
+    pub store: String,
+    pub install_dir: String,
+    pub exe_path: Option<String>,
+    pub app_id: Option<String>,
+    pub steam_header_url: Option<String>,
+    pub cover_url: Option<String>,
+    pub is_already_imported: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchImportItem {
+    pub name: String,
+    pub store: String,
+    pub exe_path: String,
+    pub steam_header_url: Option<String>,
+    pub cover_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchImportResult {
+    pub imported_count: usize,
+    pub skipped_count: usize,
+    pub errors: Vec<String>,
+}
+
+fn get_installed_steam_libraries() -> Vec<PathBuf> {
+    let mut libraries = Vec::new();
+
+    let mut candidates = Vec::new();
+    if let Ok(pf86) = std::env::var("ProgramFiles(x86)") {
+        candidates.push(PathBuf::from(pf86).join("Steam"));
+    }
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        candidates.push(PathBuf::from(pf).join("Steam"));
+    }
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        candidates.push(PathBuf::from(local).join("Programs").join("Steam"));
+    }
+
+    for drive in ["C", "D", "E", "F", "G", "H", "Z"] {
+        candidates.push(PathBuf::from(format!("{drive}:\\SteamLibrary")));
+        candidates.push(PathBuf::from(format!("{drive}:\\Games\\Steam")));
+        candidates.push(PathBuf::from(format!("{drive}:\\Steam")));
+    }
+
+    for steam_path in candidates {
+        if !steam_path.exists() {
+            continue;
+        }
+        let vdf_path = steam_path.join("steamapps").join("libraryfolders.vdf");
+        if vdf_path.exists() {
+            if let Ok(content) = fs::read_to_string(&vdf_path) {
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("\"path\"") {
+                        let parts: Vec<&str> = trimmed.split('"').collect();
+                        if parts.len() >= 4 {
+                            let path_str = parts[3].replace("\\\\", "\\");
+                            let lib_path = PathBuf::from(path_str);
+                            if lib_path.exists() && !libraries.contains(&lib_path) {
+                                libraries.push(lib_path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if steam_path.join("steamapps").exists() && !libraries.contains(&steam_path) {
+            libraries.push(steam_path);
+        }
+    }
+
+    libraries
+}
+
+fn parse_acf_file(acf_path: &Path) -> Option<(String, String, String)> {
+    let content = fs::read_to_string(acf_path).ok()?;
+    let mut appid = None;
+    let mut name = None;
+    let mut installdir = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let parts: Vec<&str> = trimmed.split('"').collect();
+        if parts.len() >= 4 {
+            let key = parts[1].to_lowercase();
+            let value = parts[3].to_string();
+            match key.as_str() {
+                "appid" => appid = Some(value),
+                "name" => name = Some(value),
+                "installdir" => installdir = Some(value),
+                _ => {}
+            }
+        }
+    }
+
+    if let (Some(a), Some(n), Some(i)) = (appid, name, installdir) {
+        Some((a, n, i))
+    } else {
+        None
+    }
+}
+
+fn is_steam_tool_or_runtime(appid: &str, name: &str) -> bool {
+    let lower_name = name.to_lowercase();
+    if ["228980", "250820", "1070560", "1391110", "1493710", "1826330"].contains(&appid) {
+        return true;
+    }
+    if lower_name.contains("steamworks")
+        || lower_name.contains("proton")
+        || lower_name.contains("steamvr")
+        || lower_name.contains("redistributable")
+        || lower_name.contains("easyanticheat")
+        || lower_name.contains("battleye")
+        || lower_name.contains("soundtrack")
+        || lower_name.contains("server")
+    {
+        return true;
+    }
+    false
+}
+
+fn is_utility_exe_name(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    let launcher_keywords = [
+        "launcher",
+        "bmlauncher",
+        "config",
+        "configuration",
+        "setting",
+        "settings",
+        "setup",
+        "updater",
+        "easyanticheat",
+        "battleye",
+        "editor",
+        "benchmark",
+        "server",
+        "activation",
+    ];
+    launcher_keywords.iter().any(|&kw| lower.contains(kw))
+}
+
+fn find_primary_exe(dir: &Path) -> Option<PathBuf> {
+    if !dir.exists() || !dir.is_dir() {
+        return None;
+    }
+
+    let mut exe_candidates = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+
+    while let Some(current_dir) = stack.pop() {
+        if let Ok(entries) = fs::read_dir(&current_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let file_name = path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    if !["_commonredist", "redist", "support", "engine", "installer", "uninstall", "mono"]
+                        .contains(&file_name.as_str())
+                    {
+                        if stack.len() < 30 {
+                            stack.push(path);
+                        }
+                    }
+                } else if path.is_file() {
+                    if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                        if ext.eq_ignore_ascii_case("exe") {
+                            let filename = path
+                                .file_name()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("")
+                                .to_lowercase();
+                            if !filename.contains("unins")
+                                && !filename.contains("crash")
+                                && !filename.contains("unitycrash")
+                                && !filename.contains("dxsetup")
+                                && !filename.contains("vcredist")
+                                && !filename.contains("dotnet")
+                                && !filename.contains("reporter")
+                            {
+                                exe_candidates.push(path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if exe_candidates.is_empty() {
+        return None;
+    }
+
+    let dir_name = dir
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    exe_candidates.sort_by_key(|path| {
+        let name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let path_str = path.to_string_lossy().to_lowercase();
+        let depth = path.components().count();
+
+        // Utility / Launcher score: 1 if contains launcher/utility keyword, 0 otherwise
+        let is_utility = is_utility_exe_name(&name);
+        let utility_priority = if is_utility { 1 } else { 0 };
+
+        // Architecture score: 0 for 64-bit, 1 for neutral, 2 for 32-bit
+        let has_64 = path_str.contains("win64")
+            || path_str.contains("x64")
+            || path_str.contains("bin64")
+            || path_str.contains("64bit")
+            || path_str.contains("x86_64");
+        let has_32 = path_str.contains("win32")
+            || path_str.contains("x86")
+            || path_str.contains("bin32")
+            || path_str.contains("32bit");
+        let arch_priority = if has_64 {
+            0
+        } else if has_32 {
+            2
+        } else {
+            1
+        };
+
+        // Name match score
+        let name_clean = name.replace(".exe", "");
+        let name_match = name.contains(&dir_name)
+            || dir_name.contains(&name_clean)
+            || name.contains("shipping");
+        let name_priority = if name_match { 0 } else { 1 };
+
+        (utility_priority, arch_priority, name_priority, depth, name.len())
+    });
+
+    exe_candidates.into_iter().next()
+}
+
+fn scan_epic_manifests() -> Vec<(String, String, PathBuf, Option<PathBuf>)> {
+    let mut results = Vec::new();
+    let mut manifest_dir = PathBuf::from("C:\\ProgramData\\Epic\\EpicGamesLauncher\\Data\\Manifests");
+    if let Ok(pd) = std::env::var("ProgramData") {
+        manifest_dir = PathBuf::from(pd)
+            .join("Epic")
+            .join("EpicGamesLauncher")
+            .join("Data")
+            .join("Manifests");
+    }
+
+    if !manifest_dir.exists() {
+        return results;
+    }
+
+    if let Ok(entries) = fs::read_dir(manifest_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map_or(false, |ext| ext == "item") {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+                        let display_name = v["DisplayName"].as_str().unwrap_or("").to_string();
+                        let app_name = v["AppName"].as_str().unwrap_or("").to_string();
+                        let install_location = v["InstallLocation"].as_str().unwrap_or("").to_string();
+                        let launch_exe = v["LaunchExecutable"].as_str().unwrap_or("").to_string();
+
+                        if !display_name.is_empty() && !install_location.is_empty() {
+                            let install_dir = PathBuf::from(&install_location);
+                            let exe_path = if !launch_exe.is_empty() {
+                                let full_exe = install_dir.join(&launch_exe);
+                                if is_utility_exe_name(&launch_exe) {
+                                    find_primary_exe(&install_dir).or_else(|| if full_exe.exists() { Some(full_exe) } else { None })
+                                } else if full_exe.exists() {
+                                    Some(full_exe)
+                                } else {
+                                    find_primary_exe(&install_dir)
+                                }
+                            } else {
+                                find_primary_exe(&install_dir)
+                            };
+
+                            results.push((app_name, display_name, install_dir, exe_path));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    results
+}
+
+fn parse_gog_info_file(game_dir: &Path) -> Option<(String, Option<PathBuf>)> {
+    if !game_dir.exists() || !game_dir.is_dir() {
+        return None;
+    }
+
+    if let Ok(entries) = fs::read_dir(game_dir) {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            if file_name.starts_with("goggame-") && file_name.ends_with(".info") {
+                if let Ok(content) = fs::read_to_string(entry.path()) {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+                        let name = v["name"]
+                            .as_str()
+                            .or_else(|| v["title"].as_str())
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+
+                        let mut exe_path = None;
+                        if let Some(tasks) = v["playTasks"].as_array() {
+                            for task in tasks {
+                                if task["isPrimary"].as_bool().unwrap_or(false)
+                                    || task["type"].as_str() == Some("FileTask")
+                                {
+                                    if let Some(rel_path) = task["path"].as_str() {
+                                        let full_exe = game_dir.join(rel_path);
+                                        if full_exe.exists() {
+                                            exe_path = Some(full_exe);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some(ref p) = exe_path {
+                            let filename = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                            if is_utility_exe_name(filename) {
+                                if let Some(primary) = find_primary_exe(game_dir) {
+                                    exe_path = Some(primary);
+                                }
+                            }
+                        }
+
+                        if exe_path.is_none() {
+                            exe_path = find_primary_exe(game_dir);
+                        }
+
+                        if !name.is_empty() {
+                            return Some((name, exe_path));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn scan_gog_games() -> Vec<(String, PathBuf, Option<PathBuf>)> {
+    let mut results = Vec::new();
+    let mut seen_paths = HashSet::new();
+
+    // Tier 1: Query GOG Galaxy SQLite Database (galaxy-2.0.db -> InstalledBaseProducts)
+    let mut db_path = PathBuf::from("C:\\ProgramData\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db");
+    if let Ok(pd) = std::env::var("ProgramData") {
+        db_path = PathBuf::from(pd)
+            .join("GOG.com")
+            .join("Galaxy")
+            .join("storage")
+            .join("galaxy-2.0.db");
+    }
+
+    if db_path.exists() {
+        if let Ok(gog_conn) = rusqlite::Connection::open_with_flags(
+            &db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        ) {
+            if let Ok(mut stmt) = gog_conn.prepare("SELECT productId, installationPath FROM InstalledBaseProducts WHERE installationPath IS NOT NULL") {
+                if let Ok(rows) = stmt.query_map([], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                }) {
+                    for row in rows.flatten() {
+                        let (_pid, path_str) = row;
+                        let path_str = path_str.trim();
+                        if !path_str.is_empty() {
+                            let game_dir = PathBuf::from(path_str);
+                            if game_dir.exists() && game_dir.is_dir() {
+                                let norm_dir = game_dir.to_string_lossy().to_lowercase();
+                                if !seen_paths.contains(&norm_dir) {
+                                    seen_paths.insert(norm_dir);
+                                    let (name, exe_path) = if let Some((info_name, info_exe)) = parse_gog_info_file(&game_dir) {
+                                        (info_name, info_exe)
+                                    } else {
+                                        let folder_name = game_dir
+                                            .file_name()
+                                            .and_then(|s| s.to_str())
+                                            .unwrap_or("GOG Game")
+                                            .to_string();
+                                        let exe = find_primary_exe(&game_dir);
+                                        (folder_name, exe)
+                                    };
+
+                                    if exe_path.is_some() {
+                                        results.push((name, game_dir, exe_path));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Tier 2: Scan Windows Registry GOG entries
+    #[cfg(target_os = "windows")]
+    {
+        let ps_cmd = "Get-ItemProperty 'HKLM:\\SOFTWARE\\WOW6432Node\\GOG.com\\Games\\*', 'HKLM:\\SOFTWARE\\GOG.com\\Games\\*' -ErrorAction SilentlyContinue | Select-Object gameName, path, workingDir, exe | ConvertTo-Json";
+        if let Ok(output) = Command::new("powershell")
+            .args(["-NoProfile", "-Command", ps_cmd])
+            .output()
+        {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let parsed: Result<serde_json::Value, _> = serde_json::from_str(&stdout);
+                if let Ok(value) = parsed {
+                    let items = if let Some(arr) = value.as_array() {
+                        arr.clone()
+                    } else if value.is_object() {
+                        vec![value]
+                    } else {
+                        Vec::new()
+                    };
+
+                    for item in items {
+                        let reg_name = item["gameName"].as_str().unwrap_or("").trim().to_string();
+                        let path_str = item["path"]
+                            .as_str()
+                            .or_else(|| item["workingDir"].as_str())
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        let exe_str = item["exe"].as_str().unwrap_or("").trim().to_string();
+
+                        if !path_str.is_empty() {
+                            let game_dir = PathBuf::from(&path_str);
+                            if game_dir.exists() {
+                                let norm_dir = game_dir.to_string_lossy().to_lowercase();
+                                if !seen_paths.contains(&norm_dir) {
+                                    seen_paths.insert(norm_dir);
+
+                                    let (name, exe_path) = if let Some((info_name, info_exe)) =
+                                        parse_gog_info_file(&game_dir)
+                                    {
+                                        (info_name, info_exe)
+                                    } else {
+                                        let exe_p = if !exe_str.is_empty() {
+                                            let p = PathBuf::from(&exe_str);
+                                            let filename = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                                            if is_utility_exe_name(filename) {
+                                                find_primary_exe(&game_dir).or_else(|| if p.exists() { Some(p) } else { None })
+                                            } else if p.exists() {
+                                                Some(p)
+                                            } else {
+                                                find_primary_exe(&game_dir)
+                                            }
+                                        } else {
+                                            find_primary_exe(&game_dir)
+                                        };
+                                        let final_name = if !reg_name.is_empty() {
+                                            reg_name
+                                        } else {
+                                            game_dir
+                                                .file_name()
+                                                .and_then(|s| s.to_str())
+                                                .unwrap_or("GOG Game")
+                                                .to_string()
+                                        };
+                                        (final_name, exe_p)
+                                    };
+
+                                    if exe_path.is_some() {
+                                        results.push((name, game_dir, exe_path));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut candidates = Vec::new();
+    if let Ok(pf) = std::env::var("ProgramFiles(x86)") {
+        candidates.push(PathBuf::from(&pf).join("GOG Galaxy").join("Games"));
+        candidates.push(PathBuf::from(&pf).join("GOG Games"));
+    }
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        candidates.push(PathBuf::from(&pf).join("GOG Galaxy").join("Games"));
+        candidates.push(PathBuf::from(&pf).join("GOG Games"));
+    }
+    for drive in ["C", "D", "E", "F", "G", "H", "Z"] {
+        candidates.push(PathBuf::from(format!("{drive}:\\GOG Galaxy\\Games")));
+        candidates.push(PathBuf::from(format!("{drive}:\\GOG Games")));
+        candidates.push(PathBuf::from(format!("{drive}:\\Games\\GOG")));
+        candidates.push(PathBuf::from(format!("{drive}:\\Games")));
+        candidates.push(PathBuf::from(format!("{drive}:\\")));
+    }
+
+    for dir in candidates {
+        if dir.exists() && dir.is_dir() {
+            if let Ok(entries) = fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let game_dir = entry.path();
+                    if game_dir.is_dir() {
+                        let norm_dir = game_dir.to_string_lossy().to_lowercase();
+                        if !seen_paths.contains(&norm_dir) {
+                            if let Some((info_name, exe_path)) = parse_gog_info_file(&game_dir) {
+                                seen_paths.insert(norm_dir);
+                                if exe_path.is_some() {
+                                    results.push((info_name, game_dir, exe_path));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    results
+}
+
+fn parse_appx_display_name(name: &str, install_location: &Path) -> String {
+    let manifest_path = install_location.join("AppxManifest.xml");
+    if manifest_path.exists() {
+        if let Ok(content) = fs::read_to_string(&manifest_path) {
+            if let Some(start) = content.find("<DisplayName>") {
+                if let Some(end) = content[start..].find("</DisplayName>") {
+                    let raw_val = &content[start + 13..start + end];
+                    let trimmed = raw_val.trim();
+                    if !trimmed.is_empty()
+                        && !trimmed.starts_with("ms-resource:")
+                        && !trimmed.starts_with('@')
+                    {
+                        return trimmed.to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    let clean_name = name
+        .trim_start_matches("Microsoft.")
+        .trim_start_matches("Xbox.")
+        .trim_start_matches("ULICTekInc.")
+        .trim_start_matches("IOStreamCo.Ltd.");
+
+    let mut result = String::new();
+    for (i, ch) in clean_name.chars().enumerate() {
+        if i > 0 && ch.is_uppercase() {
+            result.push(' ');
+        }
+        result.push(ch);
+    }
+    if result.is_empty() {
+        name.to_string()
+    } else {
+        result
+    }
+}
+
+fn is_system_path_or_app(path: &Path) -> bool {
+    let lower = path.to_string_lossy().to_lowercase();
+    lower.contains("\\systemapps\\")
+        || lower.contains("\\system32\\")
+        || lower.contains("\\winsxs\\")
+        || lower.contains("windows_ie_ac")
+        || lower.contains("winrar")
+        || lower.contains("\\gamesave")
+        || lower.contains("gamesave")
+        || lower.contains("filepicker")
+        || lower.contains("fileexplorer")
+        || lower.contains("appresolverux")
+}
+
+fn is_system_appx_package(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.contains("vclibs")
+        || lower.contains(".net")
+        || lower.contains("ui.xaml")
+        || lower.contains("directx")
+        || lower.contains("framework")
+        || lower.contains("sechealthui")
+        || lower.contains("storepurchaseapp")
+        || lower.contains("windowsstore")
+        || lower.contains("windowsappruntime")
+        || lower.contains("webexperience")
+        || lower.contains("copilot")
+        || lower.contains("yourphone")
+        || lower.contains("bingnews")
+        || lower.contains("clipchamp")
+        || lower.contains("gethelp")
+        || lower.contains("feedbackhub")
+        || lower.contains("startexperiencesapp")
+        || lower.contains("crossdevice")
+        || lower.contains("edge")
+        || lower.contains("calculator")
+        || lower.contains("soundrecorder")
+        || lower.contains("alarms")
+        || lower.contains("notepad")
+        || lower.contains("outlook")
+        || lower.contains("predatorsense")
+        || lower.contains("filepicker")
+        || lower.contains("fileexplorer")
+        || lower.contains("appresolverux")
+        || lower.contains("gamesave")
+}
+
+fn scan_xbox_games() -> Vec<(String, PathBuf, Option<PathBuf>)> {
+    // Feature postponed as requested by user
+    Vec::new()
+}
+
+#[tauri::command]
+fn scan_installed_libraries(state: tauri::State<AppState>) -> Result<Vec<ScannedGame>, String> {
+    let conn = state.db.lock().map_err(|_| "database lock poisoned")?;
+
+    let mut existing_exes = HashSet::new();
+    let mut existing_names = HashSet::new();
+
+    if let Ok(mut stmt) = conn.prepare("SELECT LOWER(exe_path) FROM executables WHERE status = 'tracked'") {
+        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            for row in rows.flatten() {
+                existing_exes.insert(normalize_exe_path(&row));
+            }
+        }
+    }
+
+    if let Ok(mut stmt) = conn.prepare("SELECT LOWER(name) FROM games") {
+        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            for row in rows.flatten() {
+                existing_names.insert(row.trim().to_lowercase());
+            }
+        }
+    }
+
+    let mut scanned_games = Vec::new();
+
+    // 1. Scan Steam
+    let steam_libs = get_installed_steam_libraries();
+    for lib in steam_libs {
+        let steamapps = lib.join("steamapps");
+        if let Ok(entries) = fs::read_dir(&steamapps) {
+            for entry in entries.flatten() {
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                if file_name.starts_with("appmanifest_") && file_name.ends_with(".acf") {
+                    if let Some((appid, name, installdir)) = parse_acf_file(&entry.path()) {
+                        if is_steam_tool_or_runtime(&appid, &name) {
+                            continue;
+                        }
+
+                        let install_path = steamapps.join("common").join(&installdir);
+                        let exe_path = find_primary_exe(&install_path);
+                        let exe_path_str = exe_path.as_ref().map(|p| p.to_string_lossy().to_string());
+                        if exe_path_str.is_none() {
+                            continue;
+                        }
+
+                        let norm_exe = exe_path_str.as_ref().map(|p| normalize_exe_path(p));
+
+                        let is_imported = norm_exe.as_ref().map_or(false, |p| existing_exes.contains(p))
+                            || existing_names.contains(&name.trim().to_lowercase());
+
+                        let steam_header_url = Some(format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/header.jpg"));
+                        let cover_url = Some(format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/library_600x900_2x.jpg"));
+
+                        scanned_games.push(ScannedGame {
+                            id: format!("steam_{appid}"),
+                            name,
+                            store: "Steam".to_string(),
+                            install_dir: install_path.to_string_lossy().to_string(),
+                            exe_path: exe_path_str,
+                            app_id: Some(appid),
+                            steam_header_url,
+                            cover_url,
+                            is_already_imported: is_imported,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Scan Epic Games
+    let epic_games = scan_epic_manifests();
+    for (app_name, display_name, install_dir, exe_path) in epic_games {
+        let exe_path_str = exe_path.as_ref().map(|p| p.to_string_lossy().to_string());
+        if exe_path_str.is_none() {
+            continue;
+        }
+
+        let norm_exe = exe_path_str.as_ref().map(|p| normalize_exe_path(p));
+
+        let is_imported = norm_exe.as_ref().map_or(false, |p| existing_exes.contains(p))
+            || existing_names.contains(&display_name.trim().to_lowercase());
+
+        scanned_games.push(ScannedGame {
+            id: format!("epic_{app_name}"),
+            name: display_name,
+            store: "Epic Games".to_string(),
+            install_dir: install_dir.to_string_lossy().to_string(),
+            exe_path: exe_path_str,
+            app_id: Some(app_name),
+            steam_header_url: None,
+            cover_url: None,
+            is_already_imported: is_imported,
+        });
+    }
+
+    // 3. Scan GOG
+    let gog_games = scan_gog_games();
+    for (name, install_dir, exe_path) in gog_games {
+        let exe_path_str = exe_path.as_ref().map(|p| p.to_string_lossy().to_string());
+        if exe_path_str.is_none() {
+            continue;
+        }
+
+        let norm_exe = exe_path_str.as_ref().map(|p| normalize_exe_path(p));
+
+        let is_imported = norm_exe.as_ref().map_or(false, |p| existing_exes.contains(p))
+            || existing_names.contains(&name.trim().to_lowercase());
+
+        scanned_games.push(ScannedGame {
+            id: format!("gog_{name}"),
+            name: name.clone(),
+            store: "GOG".to_string(),
+            install_dir: install_dir.to_string_lossy().to_string(),
+            exe_path: exe_path_str,
+            app_id: None,
+            steam_header_url: None,
+            cover_url: None,
+            is_already_imported: is_imported,
+        });
+    }
+
+    // 4. Scan Xbox
+    let xbox_games = scan_xbox_games();
+    for (name, install_dir, exe_path) in xbox_games {
+        let exe_path_str = exe_path.as_ref().map(|p| p.to_string_lossy().to_string());
+        if exe_path_str.is_none() {
+            continue;
+        }
+
+        let norm_exe = exe_path_str.as_ref().map(|p| normalize_exe_path(p));
+
+        let is_imported = norm_exe.as_ref().map_or(false, |p| existing_exes.contains(p))
+            || existing_names.contains(&name.trim().to_lowercase());
+
+        scanned_games.push(ScannedGame {
+            id: format!("xbox_{name}"),
+            name: name.clone(),
+            store: "Microsoft Store".to_string(),
+            install_dir: install_dir.to_string_lossy().to_string(),
+            exe_path: exe_path_str,
+            app_id: None,
+            steam_header_url: None,
+            cover_url: None,
+            is_already_imported: is_imported,
+        });
+    }
+
+    Ok(scanned_games)
+}
+
+#[tauri::command]
+fn batch_import_games(
+    state: tauri::State<AppState>,
+    items: Vec<BatchImportItem>,
+) -> Result<BatchImportResult, String> {
+    let now = now_ts();
+    let mut conn = state.db.lock().map_err(|_| "database lock poisoned")?;
+    let tx = conn.transaction().map_err(|err| err.to_string())?;
+
+    let mut imported_count = 0;
+    let mut skipped_count = 0;
+    let mut errors = Vec::new();
+
+    for item in items {
+        let game_name = item.name.trim();
+        let exe_path = normalize_exe_path(&item.exe_path);
+        let exe_path_display = display_exe_path(&item.exe_path);
+
+        if game_name.is_empty() || exe_path.is_empty() {
+            skipped_count += 1;
+            continue;
+        }
+
+        let exe_name = Path::new(&exe_path)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(normalize_exe_name)
+            .unwrap_or_default();
+
+        if exe_name.is_empty() {
+            skipped_count += 1;
+            continue;
+        }
+
+        let existing_assignment = tx
+            .query_row(
+                "SELECT game_id FROM executables WHERE exe_name = ?1 AND exe_path = ?2 LIMIT 1",
+                params![exe_name, exe_path],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()
+            .unwrap_or(None)
+            .flatten();
+
+        if existing_assignment.is_some() {
+            skipped_count += 1;
+            continue;
+        }
+
+        let store = normalize_store(Some(item.store));
+        let cover_url = item.cover_url.and_then(|v| (!v.trim().is_empty()).then_some(v));
+        let steam_header_url = item.steam_header_url.and_then(|v| (!v.trim().is_empty()).then_some(v));
+
+        let insert_res = tx.execute(
+            "INSERT INTO games (name, store, cover_url, steam_header_url, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+            params![game_name, store, cover_url, steam_header_url, now],
+        );
+
+        match insert_res {
+            Ok(_) => {
+                let game_id = tx.last_insert_rowid();
+                let _ = tx.execute(
+                    "INSERT INTO executables (game_id, exe_name, exe_path, exe_path_display, status, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'tracked', ?5, ?5)",
+                    params![game_id, exe_name, exe_path, exe_path_display, now],
+                );
+                insert_notification(&tx, "added", game_name, now).ok();
+                imported_count += 1;
+            }
+            Err(e) => {
+                errors.push(format!("Failed to import \"{game_name}\": {e}"));
+                skipped_count += 1;
+            }
+        }
+    }
+
+    tx.commit().map_err(|err| err.to_string())?;
+
+    Ok(BatchImportResult {
+        imported_count,
+        skipped_count,
+        errors,
+    })
+}
+
 fn query_local_game_detail(
     conn: &Connection,
     game_id: i64,
@@ -6754,6 +7619,217 @@ fn clear_local_data(state: tauri::State<AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn export_backup_data(
+    app: AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<Option<String>, String> {
+    {
+        let conn = state.db.lock().map_err(|_| "database lock poisoned")?;
+        let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+    }
+    {
+        let archive_conn = state.archive_db.lock().map_err(|_| "archive database lock poisoned")?;
+        let _ = archive_conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+    }
+
+    let default_filename = format!(
+        "TylePlay_Backup_{}.tyleplaybak",
+        Local::now().format("%Y-%m-%d_%H%M%S")
+    );
+
+    let save_path = rfd::FileDialog::new()
+        .set_title("Export TylePlay Backup")
+        .add_filter("TylePlay Backup (*.tyleplaybak)", &["tyleplaybak"])
+        .add_filter("Zip Archive (*.zip)", &["zip"])
+        .set_file_name(&default_filename)
+        .save_file();
+
+    let Some(dest_path) = save_path else {
+        return Ok(None);
+    };
+
+    let app_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("failed to resolve app data dir: {err}"))?;
+
+    if !app_dir.exists() {
+        return Err("App data directory does not exist".to_string());
+    }
+
+    let file = fs::File::create(&dest_path)
+        .map_err(|err| format!("failed to create backup file: {err}"))?;
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Deflated);
+
+    fn add_dir_to_zip(
+        zip: &mut ZipWriter<fs::File>,
+        options: SimpleFileOptions,
+        base_dir: &Path,
+        current_dir: &Path,
+    ) -> Result<(), String> {
+        let entries = fs::read_dir(current_dir)
+            .map_err(|err| format!("failed to read directory: {err}"))?;
+
+        for entry in entries {
+            let entry = entry.map_err(|err| format!("failed to read directory entry: {err}"))?;
+            let path = entry.path();
+            let relative_path = path
+                .strip_prefix(base_dir)
+                .map_err(|err| format!("failed to strip prefix: {err}"))?;
+
+            let name_str = relative_path.to_string_lossy().replace('\\', "/");
+
+            if name_str.ends_with(".sqlite-wal") || name_str.ends_with(".sqlite-shm") {
+                continue;
+            }
+
+            if path.is_dir() {
+                zip.add_directory(&name_str, options)
+                    .map_err(|err| format!("failed to add directory to zip: {err}"))?;
+                add_dir_to_zip(zip, options, base_dir, &path)?;
+            } else if path.is_file() {
+                zip.start_file(&name_str, options)
+                    .map_err(|err| format!("failed to start zip file: {err}"))?;
+                let mut f = fs::File::open(&path)
+                    .map_err(|err| format!("failed to open file {}: {err}", path.display()))?;
+                let mut buffer = Vec::new();
+                f.read_to_end(&mut buffer)
+                    .map_err(|err| format!("failed to read file {}: {err}", path.display()))?;
+                zip.write_all(&buffer)
+                    .map_err(|err| format!("failed to write to zip {}: {err}", name_str))?;
+            }
+        }
+        Ok(())
+    }
+
+    add_dir_to_zip(&mut zip, options, &app_dir, &app_dir)?;
+    zip.finish().map_err(|err| format!("failed to finalize zip archive: {err}"))?;
+
+    Ok(Some(dest_path.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+fn import_backup_data(
+    app: AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<bool, String> {
+    let pick_path = rfd::FileDialog::new()
+        .set_title("Import TylePlay Backup")
+        .add_filter("TylePlay Backup (*.tyleplaybak, *.zip)", &["tyleplaybak", "zip"])
+        .pick_file();
+
+    let Some(backup_file_path) = pick_path else {
+        return Ok(false);
+    };
+
+    let file = fs::File::open(&backup_file_path)
+        .map_err(|err| format!("failed to open backup file: {err}"))?;
+    let mut archive = ZipArchive::new(file)
+        .map_err(|err| format!("invalid backup archive file: {err}"))?;
+
+    let mut contains_main_db = false;
+    for i in 0..archive.len() {
+        let file_entry = archive.by_index(i).map_err(|err| err.to_string())?;
+        if file_entry.name().ends_with("tyleplay.sqlite") {
+            contains_main_db = true;
+            break;
+        }
+    }
+
+    if !contains_main_db {
+        return Err("Invalid TylePlay backup file: missing 'tyleplay.sqlite' database".to_string());
+    }
+
+    let app_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("failed to resolve app data dir: {err}"))?;
+
+    let db_path = app_db_path(&app)?;
+    let archive_path = archive_db_path(&app)?;
+
+    {
+        let mut conn = state.db.lock().map_err(|_| "database lock poisoned")?;
+        let mut archive_conn = state
+            .archive_db
+            .lock()
+            .map_err(|_| "archive database lock poisoned")?;
+
+        *conn = Connection::open_in_memory().map_err(|err| err.to_string())?;
+        *archive_conn = Connection::open_in_memory().map_err(|err| err.to_string())?;
+    }
+
+    if app_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&app_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let _ = fs::remove_dir_all(&path);
+                } else {
+                    let _ = fs::remove_file(&path);
+                }
+            }
+        }
+    }
+
+    fs::create_dir_all(&app_dir)
+        .map_err(|err| format!("failed to recreate app data dir: {err}"))?;
+
+    for i in 0..archive.len() {
+        let mut file_entry = archive.by_index(i).map_err(|err| err.to_string())?;
+        let outpath = match file_entry.enclosed_name() {
+            Some(path) => app_dir.join(path),
+            None => continue,
+        };
+
+        if file_entry.is_dir() {
+            fs::create_dir_all(&outpath)
+                .map_err(|err| format!("failed to create dir {}: {err}", outpath.display()))?;
+        } else {
+            if let Some(p) = outpath.parent() {
+                if !p.exists() {
+                    fs::create_dir_all(p)
+                        .map_err(|err| format!("failed to create dir {}: {err}", p.display()))?;
+                }
+            }
+            let mut outfile = fs::File::create(&outpath)
+                .map_err(|err| format!("failed to create file {}: {err}", outpath.display()))?;
+            std::io::copy(&mut file_entry, &mut outfile)
+                .map_err(|err| format!("failed to extract file {}: {err}", outpath.display()))?;
+        }
+    }
+
+    let new_conn = Connection::open(&db_path)
+        .map_err(|err| format!("failed to re-open main database: {err}"))?;
+    let new_archive_conn = Connection::open(&archive_path)
+        .map_err(|err| format!("failed to re-open archive database: {err}"))?;
+
+    init_db(&new_conn).map_err(|err| format!("failed to init restored db: {err}"))?;
+    init_archive_db(&new_archive_conn)
+        .map_err(|err| format!("failed to init restored archive db: {err}"))?;
+
+    {
+        let mut conn = state.db.lock().map_err(|_| "database lock poisoned")?;
+        let mut archive_conn = state
+            .archive_db
+            .lock()
+            .map_err(|_| "archive database lock poisoned")?;
+        *conn = new_conn;
+        *archive_conn = new_archive_conn;
+    }
+
+    let app_handle = app.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(300));
+        app_handle.restart();
+    });
+
+    Ok(true)
+}
+
+#[tauri::command]
 fn delete_user_account(state: tauri::State<AppState>) -> Result<UserSettings, String> {
     let conn = state.db.lock().map_err(|_| "database lock poisoned")?;
     conn.execute("DELETE FROM settings WHERE key = ?1", params!["user_settings_v1"])
@@ -7376,6 +8452,8 @@ pub fn run() {
             save_user_settings,
             delete_user_account,
             clear_local_data,
+            export_backup_data,
+            import_backup_data,
             get_igdb_settings,
             save_igdb_settings,
             search_igdb_games,
@@ -7388,7 +8466,9 @@ pub fn run() {
             reset_library_metadata_to_igdb,
             refresh_library_metadata,
             update_game_user_rating_review,
-            update_session_note
+            update_session_note,
+            scan_installed_libraries,
+            batch_import_games
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

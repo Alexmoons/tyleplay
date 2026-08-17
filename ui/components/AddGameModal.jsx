@@ -1,5 +1,5 @@
 import React, { memo, startTransition, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDownIcon, CloseIcon, FolderIcon, InfoCircleIcon, SearchIcon, WarningTriangleIcon } from "./icons";
+import { ChevronDownIcon, CloseIcon, FolderIcon, InfoCircleIcon, RefreshIcon, SearchIcon, WarningTriangleIcon } from "./icons";
 import LoadingIndicator from "./LoadingIndicator";
 import { igdbCategoryLabel } from "../lib/igdb-game-type";
 import { formatDurationLong } from "../lib/game-helpers";
@@ -9,9 +9,9 @@ import exeHelpImage1 from "../../src/picture/image1.png";
 import exeHelpImage2 from "../../src/picture/image2.png";
 import exeHelpImage3 from "../../src/picture/image3.png";
 
-const STORE_OPTIONS = ["", "Steam", "Epic Games", "GOG", "Microsoft Store", "PlayStation", "Rockstar", "EA App", "Ubisoft Connect"];
+const STORE_OPTIONS = ["", "Steam", "Epic Games", "GOG", "Microsoft Store", "Rockstar", "EA App", "Ubisoft Connect"];
 
-export default function AddGameModal({ open, onClose, onAdded, onNotify }) {
+export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenAutoScan }) {
   const [form, setForm] = useState(createEmptyForm);
   const [hasName, setHasName] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -545,7 +545,6 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify }) {
             {selectedIgdb ? (
               <p className="add-game-selection-note">
                 Metadata source: {selectedIgdb.name}
-                {selectedIgdb.first_release_year ? ` (${selectedIgdb.first_release_year})` : ""}
               </p>
             ) : hasName ? (
               <p className="add-game-selection-note">Manual mode is active. The game will be saved without metadata.</p>
@@ -593,13 +592,17 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify }) {
             />
           </div>
 
-          <div className="confirm-modal-actions add-game-actions">
-            <button type="button" className="action-button action-button-danger" onClick={onClose} disabled={saving}>
-              Cancel
-            </button>
-            <button type="submit" className="action-button action-button-primary" disabled={!canSubmit}>
-              <span>{saving ? "Adding..." : "Add Game"}</span>
-            </button>
+          <div className="confirm-modal-actions add-game-actions" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", marginTop: "1.2rem" }}>
+            <div />
+
+            <div className="flex items-center gap-2.5">
+              <button type="button" className="action-button action-button-danger" onClick={onClose} disabled={saving}>
+                Cancel
+              </button>
+              <button type="submit" className="action-button action-button-primary" disabled={!canSubmit}>
+                <span>{saving ? "Adding..." : "Add Game"}</span>
+              </button>
+            </div>
           </div>
         </form>
       </section>

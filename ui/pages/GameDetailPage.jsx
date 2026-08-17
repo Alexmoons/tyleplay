@@ -1133,8 +1133,11 @@ function DetailRow({ icon, label, value, imageValue, isPath }) {
 }
 
 function renderPlayTimeFormatted(totalSeconds) {
-  const seconds = Math.max(0, Number(totalSeconds || 0));
-  if (seconds <= 0) {
+  const formatted = formatDurationLong(totalSeconds || 0);
+  const regex = /(\d+(?:[.,]\d+)?)\s*([a-zA-Z]+)/g;
+  const matches = [...formatted.matchAll(regex)];
+
+  if (!matches.length) {
     return (
       <div className="flex items-baseline">
         <span className="text-xl lg:text-2xl font-black text-[#8d88ff]">0</span>
@@ -1143,24 +1146,19 @@ function renderPlayTimeFormatted(totalSeconds) {
     );
   }
 
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-
-  if (hours > 0) {
-    return (
-      <div className="flex items-baseline gap-0.5">
-        <span className="text-xl lg:text-2xl font-black text-[#8d88ff]">{hours}</span>
-        <span className="text-xs font-bold text-[#b8b5ff] mr-1">h</span>
-        <span className="text-xl lg:text-2xl font-black text-[#8d88ff]">{minutes}</span>
-        <span className="text-xs font-bold text-[#b8b5ff]">m</span>
-      </div>
-    );
-  }
-
   return (
     <div className="flex items-baseline gap-0.5">
-      <span className="text-xl lg:text-2xl font-black text-[#8d88ff]">{minutes}</span>
-      <span className="text-xs font-bold text-[#b8b5ff]">m</span>
+      {matches.map((match, idx) => {
+        const val = match[1];
+        const unit = match[2];
+        const isLast = idx === matches.length - 1;
+        return (
+          <React.Fragment key={idx}>
+            <span className="text-xl lg:text-2xl font-black text-[#8d88ff]">{val}</span>
+            <span className={`text-xs font-bold text-[#b8b5ff]${!isLast ? " mr-1" : ""}`}>{unit}</span>
+          </React.Fragment>
+        );
+      })}
     </div>
   );
 }

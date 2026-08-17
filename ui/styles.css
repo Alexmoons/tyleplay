@@ -5992,6 +5992,53 @@ img {
   line-height: 1.5;
 }
 
+.add-game-scan-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background-color: #1f1f1f;
+  color: #8a80ff;
+  border-radius: 9999px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 0;
+  cursor: pointer;
+  transition: background-color 180ms ease, color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.add-game-scan-trigger:hover {
+  background-color: #2a2a2a;
+  color: #a095ff;
+}
+
+.autoscan-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background-color: #242424;
+  color: rgba(255, 255, 255, 0.8);
+  border-radius: 9999px;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 0;
+  cursor: pointer;
+  transition: background-color 180ms ease, color 180ms ease, transform 180ms ease;
+}
+
+.autoscan-pill-btn:hover {
+  background-color: #303030;
+  color: #ffffff;
+}
+
+.autoscan-pill-btn.is-active {
+  background-color: #6f63ff;
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 2px 10px rgba(111, 99, 255, 0.45);
+}
+
 .add-game-close {
   width: 34px;
   height: 34px;

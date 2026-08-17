@@ -62,6 +62,7 @@ import {
   Check,
   Notebook,
   FileText,
+  Upload,
 } from "lucide-react";
 
 const iconProps = {
@@ -238,8 +239,16 @@ export function ExportIcon(props) {
   return render(Download, props);
 }
 
+export function ImportIcon(props) {
+  return render(Upload, props);
+}
+
 export function DownloadIcon(props) {
   return render(Download, props);
+}
+
+export function UploadIcon(props) {
+  return render(Upload, props);
 }
 
 export function BellIcon(props) {

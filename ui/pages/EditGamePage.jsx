@@ -6,7 +6,7 @@ import { buildLogoPresentationStyle, getInitials, resolveBackdropMedia, resolveG
 import { invoke } from "../lib/tauri";
 import StarRating from "../components/StarRating";
 
-const STORE_OPTIONS = ["", "Steam", "Epic Games", "GOG", "Microsoft Store", "PlayStation", "Rockstar", "EA App", "Ubisoft Connect"];
+const STORE_OPTIONS = ["", "Steam", "Epic Games", "GOG", "Microsoft Store", "Rockstar", "EA App", "Ubisoft Connect"];
 const COMPLETION_STATUS_OPTIONS = ["Backlog", "In Progress", "Completed", "100% Mastered", "Dropped"];
 const AGE_RATING_OPTIONS = ["", "PEGI 3", "PEGI 7", "PEGI 12", "PEGI 16", "PEGI 18"];
 const RELEASE_YEAR_OPTIONS = Array.from({ length: 201 }, (_, index) => String(1900 + index));

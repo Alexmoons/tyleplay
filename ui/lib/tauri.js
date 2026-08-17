@@ -191,7 +191,7 @@ const mockLibrary = [
     name: "Ghost of Tsushima",
     cover_url: "https://images.igdb.com/igdb/image/upload/t_cover_big/co744o.png",
     backdrop_url: "https://images.igdb.com/igdb/image/upload/t_1080p/sc6z7b.jpg",
-    store: "PlayStation",
+    store: "Steam",
     created_at: mockNow - 86400 * 150,
     release_year: 2024,
     total_seconds: 76200,
@@ -836,6 +836,14 @@ export async function invoke(command, args) {
       },
     });
     return { ...mockUserSettings };
+  }
+
+  if (command === "export_backup_data") {
+    return "C:\\Users\\User\\Downloads\\TylePlay_Backup.tyleplaybak";
+  }
+
+  if (command === "import_backup_data") {
+    return true;
   }
 
   if (command === "get_igdb_settings") {

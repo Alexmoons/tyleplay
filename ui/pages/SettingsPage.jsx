@@ -7,9 +7,11 @@ import {
   ClockIcon,
   CogIcon,
   DatabaseIcon,
+  ExportIcon,
   FacebookIcon,
   GithubIcon,
   GlobeIcon,
+  ImportIcon,
   InfoCircleIcon,
   InstagramIcon,
   MailIcon,
@@ -437,29 +439,91 @@ export default function SettingsPage({
     }
   }
 
-  async function handleClearLocalData() {
-    if (!window.confirm("Delete the local game database and archive database? This cannot be undone.")) {
-      return;
-    }
+  const [exportingBackup, setExportingBackup] = useState(false);
+  const [restoringBackup, setRestoringBackup] = useState(false);
 
-    setClearingData(true);
+  async function handleExportBackup() {
+    setExportingBackup(true);
     try {
-      await invoke("clear_local_data");
-      await onRefreshLibrary?.();
-      onNotify?.({
-        tone: "success",
-        title: "Database deleted.",
-        message: "Game, session, archive, and notification data were removed.",
-      });
+      const savedPath = await invoke("export_backup_data");
+      if (savedPath) {
+        onNotify?.({
+          tone: "success",
+          title: "Backup Exported",
+          message: `Data saved into a ${savedPath}`,
+        });
+      }
     } catch (error) {
       onNotify?.({
         tone: "danger",
-        title: "Unable to delete database.",
+        title: "Export Failed",
         message: error?.message || String(error),
       });
     } finally {
-      setClearingData(false);
+      setExportingBackup(false);
     }
+  }
+
+  function handleRestoreBackup() {
+    onRequestConfirm?.({
+      title: "Restore Data",
+      message: "Restoring data will delete current data. Do you want to continue?",
+      confirmLabel: "Restore",
+      cancelLabel: "Cancel",
+      tone: "danger",
+      onConfirm: async () => {
+        setRestoringBackup(true);
+        try {
+          const success = await invoke("import_backup_data");
+          if (success) {
+            await onRefreshLibrary?.();
+            onNotify?.({
+              tone: "success",
+              title: "Data Restored",
+              message: "Database and data files cleanly restored from backup.",
+            });
+          }
+        } catch (error) {
+          onNotify?.({
+            tone: "danger",
+            title: "Restore Failed",
+            message: error?.message || String(error),
+          });
+        } finally {
+          setRestoringBackup(false);
+        }
+      },
+    });
+  }
+
+  function handleClearLocalData() {
+    onRequestConfirm?.({
+      title: "Delete Data",
+      message: "Are you sure you want to delete all local game data and archives? This cannot be undone.",
+      confirmLabel: "Delete Data",
+      cancelLabel: "Cancel",
+      tone: "danger",
+      onConfirm: async () => {
+        setClearingData(true);
+        try {
+          await invoke("clear_local_data");
+          await onRefreshLibrary?.();
+          onNotify?.({
+            tone: "success",
+            title: "Data deleted.",
+            message: "Game, session, archive, and notification data were removed.",
+          });
+        } catch (error) {
+          onNotify?.({
+            tone: "danger",
+            title: "Unable to delete data.",
+            message: error?.message || String(error),
+          });
+        } finally {
+          setClearingData(false);
+        }
+      },
+    });
   }
 
   function handleDeleteAccount() {
@@ -719,6 +783,44 @@ export default function SettingsPage({
                 <div className="settings-danger-block">
                   <div className="settings-danger-copy">
                     <div className="settings-danger-icon">
+                      <ExportIcon />
+                    </div>
+                    <div>
+                      <strong>Export Data</strong>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="action-button action-button-primary"
+                    disabled={exportingBackup}
+                    onClick={handleExportBackup}
+                  >
+                    {exportingBackup ? "Exporting..." : "Export"}
+                  </button>
+                </div>
+
+                <div className="settings-danger-block">
+                  <div className="settings-danger-copy">
+                    <div className="settings-danger-icon">
+                      <ImportIcon />
+                    </div>
+                    <div>
+                      <strong>Restore Data</strong>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="action-button action-button-primary"
+                    disabled={restoringBackup}
+                    onClick={handleRestoreBackup}
+                  >
+                    {restoringBackup ? "Restoring..." : "Restore"}
+                  </button>
+                </div>
+
+                <div className="settings-danger-block">
+                  <div className="settings-danger-copy">
+                    <div className="settings-danger-icon">
                       <TrashIcon />
                     </div>
                     <div>
@@ -740,7 +842,7 @@ export default function SettingsPage({
                       <DatabaseIcon />
                     </div>
                     <div>
-                      <strong>Delete Database</strong>
+                      <strong>Delete Data</strong>
                     </div>
                   </div>
                   <button
@@ -749,7 +851,7 @@ export default function SettingsPage({
                     disabled={clearingData}
                     onClick={handleClearLocalData}
                   >
-                    {clearingData ? "Deleting..." : "Delete Database"}
+                    {clearingData ? "Deleting..." : "Delete Data"}
                   </button>
                 </div>
               </div>

@@ -1,6 +1,6 @@
 [package]
 name = "tyleplay"
-version = "2.3.6"
+version = "2.3.7"
 description = "TylePlay"
 authors = ["Alexmoons/Artyle"]
 license = "GPL-3.0-or-later"
@@ -31,3 +31,4 @@ sysinfo = "0.30"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 rfd = "0.15"
 urlencoding = "2.1"
+zip = "2.2.0"

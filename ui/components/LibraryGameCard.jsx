@@ -409,9 +409,6 @@ function formatStoreBadgeLabel(value) {
     case "origin":
     case "ea":
       return "EA";
-    case "playstation":
-    case "ps":
-      return "PS";
     default:
       return label;
   }
