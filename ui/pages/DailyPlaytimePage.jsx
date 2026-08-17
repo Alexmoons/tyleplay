@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftIcon, ChevronDownIcon, CloseIcon } from "../components/icons";
+import { ArrowLeftIcon, ChevronDownIcon, CloseIcon, ExportIcon } from "../components/icons";
 import LoadingIndicator from "../components/LoadingIndicator";
 import { formatDurationDetailed } from "../lib/game-helpers";
 import { invoke } from "../lib/tauri";
@@ -7,6 +7,7 @@ import { invoke } from "../lib/tauri";
 export default function DailyPlaytimePage({ onBack, onNotify, initialOverview = null }) {
   const [days, setDays] = useState(() => Array.isArray(initialOverview?.days) ? initialOverview.days : []);
   const [loading, setLoading] = useState(() => !Array.isArray(initialOverview?.days));
+  const [exporting, setExporting] = useState(false);
   const [selectedDay, setSelectedDay] = useState(null);
   const [selectedYear, setSelectedYear] = useState("");
   const [openMonthKeys, setOpenMonthKeys] = useState([]);
@@ -22,6 +23,60 @@ export default function DailyPlaytimePage({ onBack, onNotify, initialOverview = 
       title,
       message: nextError?.message || String(nextError),
     });
+  }
+
+  async function handleExportCsv() {
+    if (!filteredDays.length) {
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const csvRows = [
+        ["Date", "Daily Total Playtime", "Game", "Game Playtime"].map(csvCell).join(","),
+      ];
+
+      filteredDays.forEach((day) => {
+        const dateStr = formatDayLabel(day.day_start);
+        const totalStr = formatDurationDetailed(day.total_seconds || 0);
+
+        if (Array.isArray(day.all_games) && day.all_games.length > 0) {
+          day.all_games.forEach((game, index) => {
+            csvRows.push([
+              csvCell(index === 0 ? dateStr : ""),
+              csvCell(index === 0 ? totalStr : ""),
+              csvCell(game.name || "Unknown Game"),
+              csvCell(formatDurationDetailed(game.total_seconds || 0)),
+            ].join(","));
+          });
+        } else {
+          csvRows.push([
+            csvCell(dateStr),
+            csvCell(totalStr),
+            csvCell("-"),
+            csvCell("-"),
+          ].join(","));
+        }
+      });
+
+      const fileName = `daily-playtime-${selectedYear || "all"}.csv`;
+      const savedPath = await invoke("export_game_sessions_csv", {
+        fileName,
+        content: csvRows.join("\n"),
+      });
+
+      if (savedPath) {
+        notifyDaily({
+          tone: "success",
+          title: "Daily playtime exported.",
+          message: `Saved to ${savedPath}`,
+        });
+      }
+    } catch (nextError) {
+      notifyDailyError("Unable to export daily playtime.", nextError);
+    } finally {
+      setExporting(false);
+    }
   }
 
   useEffect(() => {
@@ -161,7 +216,19 @@ export default function DailyPlaytimePage({ onBack, onNotify, initialOverview = 
         <article className="daily-playtime-panel">
           <div className="daily-playtime-panel-head">
             <span>{filteredDays.length} tracked days</span>
-            <YearSelect options={yearOptions} value={selectedYear} onChange={setSelectedYear} />
+            <div className="daily-playtime-head-actions">
+              <YearSelect options={yearOptions} value={selectedYear} onChange={setSelectedYear} />
+              <button
+                type="button"
+                className="daily-playtime-export-btn"
+                onClick={handleExportCsv}
+                disabled={exporting || loading || !filteredDays.length}
+                title={`Export ${selectedYear || "all"} daily playtime to CSV`}
+              >
+                <ExportIcon />
+                <span>{exporting ? "Exporting..." : "Export CSV"}</span>
+              </button>
+            </div>
           </div>
 
           {loading ? <LoadingIndicator className="stats-loading-block" label="Loading daily playtime..." /> : null}
@@ -369,4 +436,12 @@ function renderGameList(games) {
       <span className="daily-playtime-game-name">{game.name}</span>
     </React.Fragment>
   ));
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  if (text.includes(",") || text.includes('"') || text.includes("\n")) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
 }

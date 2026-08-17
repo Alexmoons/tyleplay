@@ -1,3 +1,5 @@
+import { formatDurationLong } from "./game-helpers";
+
 export const DASHBOARD_NOTIFICATION_LIMIT = 15;
 
 export function resolveNotificationTone(kind) {
@@ -17,9 +19,17 @@ export function resolveNotificationTone(kind) {
   }
 }
 
-export function formatNotificationDetail(kind, timestamp) {
+export function formatNotificationDetail(kind, timestamp, durationSeconds) {
   const prefix = resolveNotificationPrefix(kind);
-  return `${prefix} ${formatRelativeTime(timestamp)}`;
+  const relativeTime = formatRelativeTime(timestamp);
+  const normalizedKind = String(kind || "").toLowerCase();
+
+  if (normalizedKind === "played" && durationSeconds !== undefined && durationSeconds !== null && Number(durationSeconds) > 0) {
+    const formattedDuration = formatDurationLong(Number(durationSeconds));
+    return `${prefix} ${relativeTime} | Duration: ${formattedDuration}`;
+  }
+
+  return `${prefix} ${relativeTime}`;
 }
 
 function resolveNotificationPrefix(kind) {

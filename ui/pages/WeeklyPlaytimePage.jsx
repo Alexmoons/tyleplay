@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftIcon, ChevronDownIcon, CloseIcon } from "../components/icons";
+import { ArrowLeftIcon, ChevronDownIcon, CloseIcon, ExportIcon } from "../components/icons";
 import LoadingIndicator from "../components/LoadingIndicator";
 import { formatDurationDetailed } from "../lib/game-helpers";
 import { invoke } from "../lib/tauri";
@@ -7,6 +7,7 @@ import { invoke } from "../lib/tauri";
 export default function WeeklyPlaytimePage({ onBack, onNotify, initialOverview = null }) {
   const [weeks, setWeeks] = useState(() => Array.isArray(initialOverview?.weeks) ? initialOverview.weeks : []);
   const [loading, setLoading] = useState(() => !Array.isArray(initialOverview?.weeks));
+  const [exporting, setExporting] = useState(false);
   const [selectedWeek, setSelectedWeek] = useState(null);
   const [selectedYear, setSelectedYear] = useState("");
   const [openMonthKeys, setOpenMonthKeys] = useState([]);
@@ -22,6 +23,60 @@ export default function WeeklyPlaytimePage({ onBack, onNotify, initialOverview =
       title,
       message: nextError?.message || String(nextError),
     });
+  }
+
+  async function handleExportCsv() {
+    if (!filteredWeeks.length) {
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const csvRows = [
+        ["Week", "Weekly Total Playtime", "Game", "Game Playtime"].map(csvCell).join(","),
+      ];
+
+      filteredWeeks.forEach((week) => {
+        const weekStr = formatWeekLabel(week.week_start);
+        const totalStr = formatDurationDetailed(week.total_seconds || 0);
+
+        if (Array.isArray(week.all_games) && week.all_games.length > 0) {
+          week.all_games.forEach((game, index) => {
+            csvRows.push([
+              csvCell(index === 0 ? weekStr : ""),
+              csvCell(index === 0 ? totalStr : ""),
+              csvCell(game.name || "Unknown Game"),
+              csvCell(formatDurationDetailed(game.total_seconds || 0)),
+            ].join(","));
+          });
+        } else {
+          csvRows.push([
+            csvCell(weekStr),
+            csvCell(totalStr),
+            csvCell("-"),
+            csvCell("-"),
+          ].join(","));
+        }
+      });
+
+      const fileName = `weekly-playtime-${selectedYear || "all"}.csv`;
+      const savedPath = await invoke("export_game_sessions_csv", {
+        fileName,
+        content: csvRows.join("\n"),
+      });
+
+      if (savedPath) {
+        notifyWeekly({
+          tone: "success",
+          title: "Weekly playtime exported.",
+          message: `Saved to ${savedPath}`,
+        });
+      }
+    } catch (nextError) {
+      notifyWeeklyError("Unable to export weekly playtime.", nextError);
+    } finally {
+      setExporting(false);
+    }
   }
 
   useEffect(() => {
@@ -161,7 +216,19 @@ export default function WeeklyPlaytimePage({ onBack, onNotify, initialOverview =
         <article className="daily-playtime-panel">
           <div className="daily-playtime-panel-head">
             <span>{filteredWeeks.length} tracked weeks</span>
-            <YearSelect options={yearOptions} value={selectedYear} onChange={setSelectedYear} />
+            <div className="daily-playtime-head-actions">
+              <YearSelect options={yearOptions} value={selectedYear} onChange={setSelectedYear} />
+              <button
+                type="button"
+                className="daily-playtime-export-btn"
+                onClick={handleExportCsv}
+                disabled={exporting || loading || !filteredWeeks.length}
+                title={`Export ${selectedYear || "all"} weekly playtime to CSV`}
+              >
+                <ExportIcon />
+                <span>{exporting ? "Exporting..." : "Export CSV"}</span>
+              </button>
+            </div>
           </div>
 
           {loading ? <LoadingIndicator className="stats-loading-block" label="Loading weekly playtime..." /> : null}
@@ -371,4 +438,12 @@ function renderGameList(games) {
       <span className="daily-playtime-game-name">{game.name}</span>
     </React.Fragment>
   ));
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  if (text.includes(",") || text.includes('"') || text.includes("\n")) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
 }

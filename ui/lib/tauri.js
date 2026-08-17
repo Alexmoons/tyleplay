@@ -842,6 +842,10 @@ export async function invoke(command, args) {
     return "C:\\Users\\User\\Downloads\\TylePlay_Backup.tyleplaybak";
   }
 
+  if (command === "trigger_auto_backup") {
+    return "C:\\Users\\User\\Documents\\TylePlay\\Backup\\TylePlay_Backup_2026-08-17_230000.tyleplaybak";
+  }
+
   if (command === "import_backup_data") {
     return true;
   }
@@ -1024,7 +1028,7 @@ export async function invoke(command, args) {
 
   if (command === "export_game_sessions_csv") {
     const fileName = String(args?.fileName || "game-sessions.csv").trim() || "game-sessions.csv";
-    return `C:\\Users\\Public\\Downloads\\${fileName}`;
+    return `C:\\Users\\User\\Documents\\TylePlay\\CSV\\${fileName}`;
   }
 
   if (command === "preflight_add_game") {

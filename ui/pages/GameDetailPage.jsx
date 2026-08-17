@@ -913,7 +913,7 @@ export default function GameDetailPage({
             <ActivityStatCard
               icon={<StopwatchIcon />}
               iconColor="text-emerald-400"
-              title="TOTAL PLAY TIME"
+              title="TOTAL PLAYTIME"
               value={renderPlayTimeFormatted(game?.total_seconds || 0)}
               caption="Across all sessions"
             />
@@ -945,28 +945,31 @@ export default function GameDetailPage({
 
         <section className="game-detail-session-panel">
           <div className="game-detail-session-toolbar">
-            <label className="game-detail-session-year">
-              <SessionYearSelect
-                options={availableSessionYears}
-                value={selectedSessionYear}
-                onChange={setSelectedSessionYear}
-              />
-            </label>
+            <div className="game-detail-session-actions">
+              <div className="game-detail-session-year">
+                <SessionYearSelect
+                  options={availableSessionYears}
+                  value={selectedSessionYear}
+                  onChange={setSelectedSessionYear}
+                />
+              </div>
 
-            <div className="game-detail-session-total">
-              <span>Total Play Time:</span>
-              <strong>{formatDurationLong(selectedYearSessions?.totalSeconds || 0)}</strong>
+              <button
+                type="button"
+                className="game-detail-session-export"
+                onClick={handleExportSessions}
+                disabled={!selectedYearSessions?.sessions?.length}
+                title={`Export ${selectedSessionYear || "all"} play sessions to CSV`}
+              >
+                <ExportIcon />
+                <span>Export CSV</span>
+              </button>
             </div>
 
-            <button
-              type="button"
-              className="game-detail-session-export"
-              onClick={handleExportSessions}
-              disabled={!selectedYearSessions?.sessions?.length}
-            >
-              <ExportIcon />
-              <span>Export</span>
-            </button>
+            <div className="game-detail-session-total">
+              <span>Total:</span>
+              <strong>{formatDurationLong(selectedYearSessions?.totalSeconds || 0)}</strong>
+            </div>
           </div>
 
           {!selectedYearSessions?.months?.length ? (
@@ -1536,6 +1539,7 @@ function SessionYearSelect({ options, value, onChange }) {
         onClick={() => options.length && setIsOpen((current) => !current)}
         disabled={!options.length}
       >
+        <span>Year:</span>
         <strong>{activeLabel}</strong>
         <ChevronDownIcon />
       </button>

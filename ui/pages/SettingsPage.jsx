@@ -76,6 +76,12 @@ const PLAYTIME_DISPLAY_MODE_OPTIONS = [
   { value: "standard", label: "Standard" },
   { value: "hours_only", label: "Hours Only" },
 ];
+const GAME_NOTIFICATION_MODE_OPTIONS = [
+  { value: "off", label: "Off" },
+  { value: "app_only", label: "In-App Only" },
+  { value: "windows_only", label: "Windows Only" },
+  { value: "both", label: "Both" },
+];
 const GENERAL_SETTINGS_SAVE_DELAY_MS = 180;
 
 const APP_VERSION = String(tauriConfig.version || "Unknown");
@@ -249,6 +255,7 @@ export default function SettingsPage({
     appSettings.app_theme,
     appSettings.close_to_system_tray,
     appSettings.default_page,
+    appSettings.game_notification_mode,
     appSettings.language,
     appSettings.playtime_display_mode,
     appSettings.start_on_system_startup,
@@ -292,6 +299,7 @@ export default function SettingsPage({
       appTheme: String(nextSettings.app_theme || "dark"),
       topGameArtwork: String(nextSettings.top_game_artwork || "capsule"),
       playtimeDisplayMode: String(nextSettings.playtime_display_mode || "standard"),
+      gameNotificationMode: String(nextSettings.game_notification_mode || "both"),
     });
   }
 
@@ -688,6 +696,22 @@ export default function SettingsPage({
                   )}
                 />
               )}
+            />
+
+            <SettingsRow
+              title="Game Notifications"
+              control={(
+                <InlineSelect
+                  icon={<MonitorIcon />}
+                  value={generalSettings.game_notification_mode || "both"}
+                  options={GAME_NOTIFICATION_MODE_OPTIONS}
+                  disabled={false}
+                  onChange={(value) => handleGeneralChange(
+                    { game_notification_mode: value },
+                    { messagePrefix: "Game Notifications set to ", messageStrong: findOptionLabel(GAME_NOTIFICATION_MODE_OPTIONS, value) }
+                  )}
+                />
+              )}
               noDivider
             />
             {savingGeneral ? <span className="settings-save-hint">Applying changes...</span> : null}
@@ -1021,7 +1045,8 @@ function areAppSettingsEqual(left, right) {
     left?.language === right?.language &&
     left?.app_theme === right?.app_theme &&
     left?.top_game_artwork === right?.top_game_artwork &&
-    left?.playtime_display_mode === right?.playtime_display_mode
+    left?.playtime_display_mode === right?.playtime_display_mode &&
+    left?.game_notification_mode === right?.game_notification_mode
   );
 }
 

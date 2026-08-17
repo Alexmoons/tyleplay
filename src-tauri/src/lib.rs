@@ -1,4 +1,4 @@
-use chrono::{Datelike, Local, NaiveDate, TimeZone};
+use chrono::{Datelike, Local, NaiveDate, TimeZone, Timelike};
 use reqwest::{blocking::Client, header::RANGE};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -20,6 +20,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, RunEvent, WindowEvent, RESTART_EXIT_CODE,
 };
+use tauri_plugin_notification::NotificationExt;
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 const TRAY_ID: &str = "main-tray";
@@ -69,6 +70,7 @@ struct AppNotification {
     game_name: String,
     created_at: i64,
     read_at: Option<i64>,
+    duration_seconds: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -240,6 +242,7 @@ struct AppSettings {
     app_theme: String,
     top_game_artwork: String,
     playtime_display_mode: String,
+    game_notification_mode: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -770,6 +773,7 @@ fn insert_notification(
     kind: &str,
     game_name: &str,
     created_at: i64,
+    duration_seconds: Option<i64>,
 ) -> Result<(), String> {
     let game_name = game_name.trim();
     if game_name.is_empty() {
@@ -778,8 +782,8 @@ fn insert_notification(
 
     conn
     .execute(
-      "INSERT INTO notifications (kind, game_name, created_at, read_at) VALUES (?1, ?2, ?3, NULL)",
-      params![kind.trim(), game_name, created_at],
+      "INSERT INTO notifications (kind, game_name, created_at, read_at, duration_seconds) VALUES (?1, ?2, ?3, NULL, ?4)",
+      params![kind.trim(), game_name, created_at, duration_seconds],
     )
     .map_err(|err| format!("failed to insert notification: {err}"))?;
 
@@ -796,25 +800,24 @@ fn seed_notifications_if_empty(conn: &Connection) -> rusqlite::Result<()> {
 
     let mut stmt = conn.prepare(
         "
-    SELECT g.name, MAX(s.ended_at) AS ended_at
+    SELECT g.name, s.ended_at, s.duration_seconds
     FROM games g
     JOIN sessions s ON s.game_id = g.id
     WHERE s.duration_seconds IS NOT NULL AND s.ended_at IS NOT NULL
-    GROUP BY g.id, g.name
-    ORDER BY ended_at DESC, g.id DESC
+    ORDER BY s.ended_at DESC, s.id DESC
     LIMIT 15
     ",
     )?;
 
     let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, Option<i64>>(2)?))
     })?;
 
     for row in rows {
-        let (game_name, created_at) = row?;
+        let (game_name, created_at, duration_seconds) = row?;
         conn.execute(
-      "INSERT INTO notifications (kind, game_name, created_at, read_at) VALUES ('played', ?1, ?2, ?2)",
-      params![game_name, created_at],
+      "INSERT INTO notifications (kind, game_name, created_at, read_at, duration_seconds) VALUES ('played', ?1, ?2, ?2, ?3)",
+      params![game_name, created_at, duration_seconds],
     )?;
     }
 
@@ -826,16 +829,34 @@ fn query_notifications(
     limit: Option<i64>,
 ) -> Result<Vec<AppNotification>, String> {
     let normalized_limit = limit.unwrap_or(0).max(0);
+    let base_sql = "
+        SELECT
+            n.id,
+            n.kind,
+            n.game_name,
+            n.created_at,
+            n.read_at,
+            COALESCE(
+                n.duration_seconds,
+                (
+                    SELECT s.duration_seconds
+                    FROM sessions s
+                    JOIN games g ON g.id = s.game_id
+                    WHERE g.name = n.game_name
+                      AND s.ended_at = n.created_at
+                      AND s.duration_seconds IS NOT NULL
+                    ORDER BY s.id DESC
+                    LIMIT 1
+                )
+            ) AS duration_seconds
+        FROM notifications n
+        ORDER BY n.created_at DESC, n.id DESC
+    ";
+
     if normalized_limit > 0 {
+        let sql = format!("{base_sql} LIMIT ?1");
         let mut stmt = conn
-            .prepare(
-                "
-        SELECT id, kind, game_name, created_at, read_at
-        FROM notifications
-        ORDER BY created_at DESC, id DESC
-        LIMIT ?1
-        ",
-            )
+            .prepare(&sql)
             .map_err(|err| format!("failed to prepare notifications query: {err}"))?;
 
         let rows = stmt
@@ -846,6 +867,7 @@ fn query_notifications(
                     game_name: row.get(2)?,
                     created_at: row.get(3)?,
                     read_at: row.get(4)?,
+                    duration_seconds: row.get(5)?,
                 })
             })
             .map_err(|err| format!("failed to read notifications: {err}"))?;
@@ -856,13 +878,7 @@ fn query_notifications(
     }
 
     let mut stmt = conn
-        .prepare(
-            "
-      SELECT id, kind, game_name, created_at, read_at
-      FROM notifications
-      ORDER BY created_at DESC, id DESC
-      ",
-        )
+        .prepare(base_sql)
         .map_err(|err| format!("failed to prepare notifications query: {err}"))?;
 
     let rows = stmt
@@ -873,6 +889,7 @@ fn query_notifications(
                 game_name: row.get(2)?,
                 created_at: row.get(3)?,
                 read_at: row.get(4)?,
+                duration_seconds: row.get(5)?,
             })
         })
         .map_err(|err| format!("failed to read notifications: {err}"))?;
@@ -2156,6 +2173,7 @@ fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
     ",
         [],
     )?;
+    let _ = conn.execute("ALTER TABLE notifications ADD COLUMN duration_seconds INTEGER", []);
     migrate_sessions_table(conn)?;
     let cleaned = cleanup_legacy_executables(conn)?;
     if cleaned > 0 {
@@ -3143,7 +3161,52 @@ fn restore_archived_game(
     Ok(())
 }
 
-fn scan_once(state: &AppState) -> Result<bool, String> {
+#[derive(Debug, Clone, serde::Serialize)]
+struct GameSessionEventPayload {
+    event_type: String,
+    game_id: i64,
+    game_name: String,
+    session_duration_seconds: i64,
+    total_play_time_seconds: i64,
+    timestamp_str: String,
+}
+
+fn get_game_total_play_time_seconds(conn: &Connection, game_id: i64) -> i64 {
+    conn.query_row(
+        "SELECT COALESCE(SUM(duration_seconds), 0) FROM sessions WHERE game_id = ?1 AND ended_at IS NOT NULL",
+        params![game_id],
+        |row| row.get(0),
+    )
+    .unwrap_or(0)
+}
+
+fn format_duration_short_str(seconds: i64) -> String {
+    let hours = seconds / 3600;
+    let mins = (seconds % 3600) / 60;
+    let secs = seconds % 60;
+    if hours > 0 {
+        format!("{hours}h {mins}m")
+    } else if mins > 0 {
+        format!("{mins}m")
+    } else {
+        format!("{secs}s")
+    }
+}
+
+fn format_timestamp_short(ts: i64) -> String {
+    if let Some(datetime) = Local.timestamp_opt(ts, 0).single() {
+        datetime.format("%H:%M").to_string()
+    } else {
+        Local::now().format("%H:%M").to_string()
+    }
+}
+
+fn string_setting_or_default(conn: &Connection, key: &str, default_value: &str) -> Result<String, String> {
+    let stored = get_setting(conn, key).map_err(|err| err.to_string())?;
+    Ok(stored.unwrap_or_else(|| default_value.to_string()))
+}
+
+fn scan_once(state: &AppState, app: Option<&AppHandle>) -> Result<bool, String> {
     let snapshot = process_snapshot();
     let now = now_ts();
     let mut live_tracked_ids = HashSet::new();
@@ -3152,6 +3215,8 @@ fn scan_once(state: &AppState) -> Result<bool, String> {
     {
         let conn = state.db.lock().map_err(|_| "database lock poisoned")?;
         let mut tracker = state.tracker.lock().map_err(|_| "tracker lock poisoned")?;
+        let notif_mode = string_setting_or_default(&conn, "game_notification_mode", "both")
+            .unwrap_or_else(|_| "both".to_string());
 
         for (exe_name, exe_path) in &snapshot {
             let Some((executable_id, game_id, game_name, status)) =
@@ -3183,13 +3248,39 @@ fn scan_once(state: &AppState) -> Result<bool, String> {
                     ActiveSession {
                         session_id,
                         game_id,
-                        game_name,
+                        game_name: game_name.clone(),
                         exe_name: exe_name.clone(),
                         exe_path: exe_path.clone(),
                         started_at: now,
                     },
                 );
                 changed = true;
+
+                let total_play_time = get_game_total_play_time_seconds(&conn, game_id);
+                let start_time_str = format_timestamp_short(now);
+                if let Some(app_handle) = app {
+                    if notif_mode == "app_only" || notif_mode == "both" {
+                        let payload = GameSessionEventPayload {
+                            event_type: "started".to_string(),
+                            game_id,
+                            game_name: game_name.clone(),
+                            session_duration_seconds: 0,
+                            total_play_time_seconds: total_play_time,
+                            timestamp_str: start_time_str.clone(),
+                        };
+                        let _ = app_handle.emit("game-session-event", payload);
+                    }
+
+                    if notif_mode == "windows_only" || notif_mode == "both" {
+                        let _ = app_handle
+                            .notification()
+                            .builder()
+                            .title("Game Started")
+                            .body(format!("{}\n{}", game_name, start_time_str))
+                            .icon("icon")
+                            .show();
+                    }
+                }
             }
         }
 
@@ -3214,8 +3305,40 @@ fn scan_once(state: &AppState) -> Result<bool, String> {
                     params![active.game_id],
                 );
 
-                insert_notification(&conn, "played", &active.game_name, now)?;
+                insert_notification(&conn, "played", &active.game_name, now, Some(duration))?;
                 changed = true;
+
+                let total_play_time = get_game_total_play_time_seconds(&conn, active.game_id);
+                let end_time_str = format_timestamp_short(now);
+                let duration_str = format_duration_short_str(duration);
+                if let Some(app_handle) = app {
+                    if notif_mode == "app_only" || notif_mode == "both" {
+                        let payload = GameSessionEventPayload {
+                            event_type: "ended".to_string(),
+                            game_id: active.game_id,
+                            game_name: active.game_name.clone(),
+                            session_duration_seconds: duration,
+                            total_play_time_seconds: total_play_time,
+                            timestamp_str: end_time_str.clone(),
+                        };
+                        let _ = app_handle.emit("game-session-event", payload);
+                    }
+
+                    if notif_mode == "windows_only" || notif_mode == "both" {
+                        let _ = app_handle
+                            .notification()
+                            .builder()
+                            .title("Game Ended")
+                            .body(format!(
+                                "{}\n{} | Duration: {}",
+                                active.game_name,
+                                end_time_str,
+                                duration_str
+                            ))
+                            .icon("icon")
+                            .show();
+                    }
+                }
             }
         }
     }
@@ -3241,7 +3364,7 @@ fn finalize_active_sessions(
             params![ended_at, duration, active.session_id],
         )
         .map_err(|err| err.to_string())?;
-        insert_notification(conn, "played", &active.game_name, ended_at)?;
+        insert_notification(conn, "played", &active.game_name, ended_at, Some(duration))?;
     }
 
     Ok(active_sessions.len())
@@ -3249,7 +3372,7 @@ fn finalize_active_sessions(
 
 fn confirm_exit_with_active_sessions(app: &AppHandle, code: Option<i32>) -> bool {
     let state = app.state::<AppState>();
-    if let Err(err) = scan_once(&state) {
+    if let Err(err) = scan_once(&state, Some(app)) {
         log::warn!("failed to refresh active sessions before exit confirmation: {err}");
     }
     let active_count = match state.tracker.lock() {
@@ -3659,7 +3782,7 @@ fn save_user_settings_record(
     Ok(normalized)
 }
 
-fn scan_once_if_stale(state: &AppState, min_interval: Duration) -> Result<bool, String> {
+fn scan_once_if_stale(state: &AppState, app: Option<&AppHandle>, min_interval: Duration) -> Result<bool, String> {
     let now = Instant::now();
     let mut scan_state = match state.scan_state.try_lock() {
         Ok(guard) => guard,
@@ -3675,12 +3798,12 @@ fn scan_once_if_stale(state: &AppState, min_interval: Duration) -> Result<bool, 
 
     scan_state.last_run_at = Some(now);
     drop(scan_state);
-    scan_once(state)
+    scan_once(state, app)
 }
 
 fn start_watcher(_app: AppHandle, state: AppState) {
     thread::spawn(move || loop {
-        match scan_once_if_stale(&state, Duration::from_secs(2)) {
+        match scan_once_if_stale(&state, Some(&_app), Duration::from_secs(2)) {
             Ok(true) => {
                 if let Err(err) = refresh_tray_menu(&_app, &state) {
                     log::warn!("tray refresh failed: {err}");
@@ -4163,7 +4286,7 @@ fn overlap_range(start_a: i64, end_a: i64, start_b: i64, end_b: i64) -> i64 {
 
 #[tauri::command]
 fn get_dashboard(state: tauri::State<AppState>) -> Result<Dashboard, String> {
-    let _ = scan_once_if_stale(&state, Duration::from_secs(2))?;
+    let _ = scan_once_if_stale(&state, None, Duration::from_secs(2))?;
     let active_games = active_games_snapshot(&state)?;
     let conn = state.db.lock().map_err(|_| "database lock poisoned")?;
     let recent_games = query_recent_games(&conn, Some(5), &active_games)?;
@@ -4496,7 +4619,7 @@ fn query_archived_game_detail(
 
 #[tauri::command]
 fn list_games(state: tauri::State<AppState>) -> Result<Vec<GameSummary>, String> {
-    let _ = scan_once_if_stale(&state, Duration::from_secs(2))?;
+    let _ = scan_once_if_stale(&state, None, Duration::from_secs(2))?;
     let active_games = active_games_snapshot(&state)?;
     let conn = state.db.lock().map_err(|_| "database lock poisoned")?;
     query_games(&conn, None, &active_games)
@@ -4931,7 +5054,7 @@ fn add_game(
                 &exe_path,
                 &exe_path_display,
             )?;
-            insert_notification(&conn, "restored", game_name, now)?;
+            insert_notification(&conn, "restored", game_name, now, None)?;
             return Ok(AddGameResult {
                 status: "restored".to_string(),
                 game_name: game_name.to_string(),
@@ -4970,7 +5093,7 @@ fn add_game(
         }
     }
 
-    insert_notification(&conn, "added", game_name, now)?;
+    insert_notification(&conn, "added", game_name, now, None)?;
 
     Ok(AddGameResult {
         status: "added".to_string(),
@@ -4982,7 +5105,7 @@ fn add_game(
 fn get_daily_playtime_overview(
     state: tauri::State<AppState>,
 ) -> Result<DailyPlaytimeOverview, String> {
-    let _ = scan_once_if_stale(&state, Duration::from_secs(2))?;
+    let _ = scan_once_if_stale(&state, None, Duration::from_secs(2))?;
     let conn = state.db.lock().map_err(|_| "database lock poisoned")?;
     let tracker = state.tracker.lock().map_err(|_| "tracker lock poisoned")?;
     query_daily_playtime_overview(&conn, &tracker)
@@ -4992,7 +5115,7 @@ fn get_daily_playtime_overview(
 fn get_weekly_playtime_overview(
     state: tauri::State<AppState>,
 ) -> Result<WeeklyPlaytimeOverview, String> {
-    let _ = scan_once_if_stale(&state, Duration::from_secs(2))?;
+    let _ = scan_once_if_stale(&state, None, Duration::from_secs(2))?;
     let conn = state.db.lock().map_err(|_| "database lock poisoned")?;
     let tracker = state.tracker.lock().map_err(|_| "tracker lock poisoned")?;
     query_weekly_playtime_overview(&conn, &tracker)
@@ -5003,7 +5126,7 @@ fn get_playtime_overview(
     state: tauri::State<AppState>,
     mode: String,
 ) -> Result<PlaytimeOverview, String> {
-    let _ = scan_once_if_stale(&state, Duration::from_secs(2))?;
+    let _ = scan_once_if_stale(&state, None, Duration::from_secs(2))?;
     let conn = state.db.lock().map_err(|_| "database lock poisoned")?;
     let tracker = state.tracker.lock().map_err(|_| "tracker lock poisoned")?;
     query_playtime_overview(&conn, &tracker, &mode)
@@ -5039,6 +5162,9 @@ fn read_app_settings(conn: &Connection) -> Result<AppSettings, String> {
     let playtime_display_mode = get_setting(conn, "playtime_display_mode")
         .map_err(|err| err.to_string())?
         .unwrap_or_else(|| "standard".to_string());
+    let game_notification_mode = get_setting(conn, "game_notification_mode")
+        .map_err(|err| err.to_string())?
+        .unwrap_or_else(|| "both".to_string());
 
     Ok(AppSettings {
         start_on_system_startup,
@@ -5048,6 +5174,7 @@ fn read_app_settings(conn: &Connection) -> Result<AppSettings, String> {
         app_theme,
         top_game_artwork,
         playtime_display_mode,
+        game_notification_mode,
     })
 }
 
@@ -5211,7 +5338,7 @@ fn delete_game(state: tauri::State<AppState>, game_id: i64) -> Result<(), String
         return Err("game not found".to_string());
     }
 
-    insert_notification(&conn, "deleted", &game_name, now_ts())?;
+    insert_notification(&conn, "deleted", &game_name, now_ts(), None)?;
 
     Ok(())
 }
@@ -5251,7 +5378,7 @@ fn default_export_dir() -> Result<PathBuf, String> {
     #[cfg(target_os = "windows")]
     {
         if let Some(profile) = std::env::var_os("USERPROFILE") {
-            return Ok(PathBuf::from(profile).join("Downloads"));
+            return Ok(PathBuf::from(profile).join("Documents").join("TylePlay").join("CSV"));
         }
     }
 
@@ -5370,7 +5497,7 @@ fn restore_archived_game_entry(
         &exe_path_display,
     )?;
 
-    insert_notification(&conn, "restored", &archived.record.name, now_ts())?;
+    insert_notification(&conn, "restored", &archived.record.name, now_ts(), None)?;
 
     Ok(AddGameResult {
         status: "restored".to_string(),
@@ -5409,7 +5536,7 @@ fn delete_archived_game_entry(
 
     drop(conn);
     let main_conn = state.db.lock().map_err(|_| "database lock poisoned")?;
-    insert_notification(&main_conn, "permanently_deleted", &game_name, now_ts())?;
+    insert_notification(&main_conn, "permanently_deleted", &game_name, now_ts(), None)?;
 
     Ok(())
 }
@@ -6703,7 +6830,7 @@ fn batch_import_games(
                     "INSERT INTO executables (game_id, exe_name, exe_path, exe_path_display, status, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'tracked', ?5, ?5)",
                     params![game_id, exe_name, exe_path, exe_path_display, now],
                 );
-                insert_notification(&tx, "added", game_name, now).ok();
+                insert_notification(&tx, "added", game_name, now, None).ok();
                 imported_count += 1;
             }
             Err(e) => {
@@ -7333,7 +7460,7 @@ fn update_session_note(
 
 #[tauri::command]
 fn get_stats_snapshot(state: tauri::State<AppState>) -> Result<StatsSnapshot, String> {
-    let _ = scan_once_if_stale(&state, Duration::from_secs(2))?;
+    let _ = scan_once_if_stale(&state, None, Duration::from_secs(2))?;
     let active_games = active_games_snapshot(&state)?;
     let conn = state.db.lock().map_err(|_| "database lock poisoned")?;
     let tracker = state.tracker.lock().map_err(|_| "tracker lock poisoned")?;
@@ -7489,6 +7616,7 @@ fn save_app_settings(
     app_theme: String,
     top_game_artwork: String,
     playtime_display_mode: String,
+    game_notification_mode: Option<String>,
 ) -> Result<(), String> {
     let normalized_default_page = default_page.trim().to_lowercase();
     let normalized_default_page = match normalized_default_page.as_str() {
@@ -7512,6 +7640,17 @@ fn save_app_settings(
         "hours_only" => "hours_only".to_string(),
         _ => "standard".to_string(),
     };
+    let normalized_game_notification_mode = match game_notification_mode
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase()
+        .as_str()
+    {
+        "off" => "off".to_string(),
+        "app_only" => "app_only".to_string(),
+        "windows_only" => "windows_only".to_string(),
+        _ => "both".to_string(),
+    };
 
     let conn = state.db.lock().map_err(|_| "database lock poisoned")?;
     let previous_settings = read_app_settings(&conn)?;
@@ -7523,6 +7662,7 @@ fn save_app_settings(
         app_theme: normalized_theme,
         top_game_artwork: normalized_top_game_artwork,
         playtime_display_mode: normalized_playtime_display_mode,
+        game_notification_mode: normalized_game_notification_mode,
     };
     if previous_settings == next_settings {
         return Ok(());
@@ -7566,6 +7706,7 @@ fn save_app_settings(
     set_setting(&tx, "app_theme", &next_settings.app_theme).map_err(|err| err.to_string())?;
     set_setting(&tx, "top_game_artwork", &next_settings.top_game_artwork).map_err(|err| err.to_string())?;
     set_setting(&tx, "playtime_display_mode", &next_settings.playtime_display_mode).map_err(|err| err.to_string())?;
+    set_setting(&tx, "game_notification_mode", &next_settings.game_notification_mode).map_err(|err| err.to_string())?;
     tx.commit().map_err(|err| err.to_string())?;
     drop(conn);
 
@@ -7618,11 +7759,11 @@ fn clear_local_data(state: tauri::State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-fn export_backup_data(
-    app: AppHandle,
-    state: tauri::State<AppState>,
-) -> Result<Option<String>, String> {
+fn write_zip_backup(
+    app: &AppHandle,
+    state: &AppState,
+    dest_path: &Path,
+) -> Result<String, String> {
     {
         let conn = state.db.lock().map_err(|_| "database lock poisoned")?;
         let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
@@ -7631,22 +7772,6 @@ fn export_backup_data(
         let archive_conn = state.archive_db.lock().map_err(|_| "archive database lock poisoned")?;
         let _ = archive_conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
     }
-
-    let default_filename = format!(
-        "TylePlay_Backup_{}.tyleplaybak",
-        Local::now().format("%Y-%m-%d_%H%M%S")
-    );
-
-    let save_path = rfd::FileDialog::new()
-        .set_title("Export TylePlay Backup")
-        .add_filter("TylePlay Backup (*.tyleplaybak)", &["tyleplaybak"])
-        .add_filter("Zip Archive (*.zip)", &["zip"])
-        .set_file_name(&default_filename)
-        .save_file();
-
-    let Some(dest_path) = save_path else {
-        return Ok(None);
-    };
 
     let app_dir = app
         .path()
@@ -7657,7 +7782,11 @@ fn export_backup_data(
         return Err("App data directory does not exist".to_string());
     }
 
-    let file = fs::File::create(&dest_path)
+    if let Some(parent) = dest_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    let file = fs::File::create(dest_path)
         .map_err(|err| format!("failed to create backup file: {err}"))?;
     let mut zip = ZipWriter::new(file);
     let options = SimpleFileOptions::default()
@@ -7707,7 +7836,133 @@ fn export_backup_data(
     add_dir_to_zip(&mut zip, options, &app_dir, &app_dir)?;
     zip.finish().map_err(|err| format!("failed to finalize zip archive: {err}"))?;
 
-    Ok(Some(dest_path.to_string_lossy().to_string()))
+    Ok(dest_path.to_string_lossy().to_string())
+}
+
+fn resolve_documents_backup_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(user_profile) = std::env::var_os("USERPROFILE") {
+            return Ok(PathBuf::from(user_profile).join("Documents").join("TylePlay").join("Backup"));
+        }
+    }
+
+    if let Ok(doc_dir) = app.path().document_dir() {
+        return Ok(doc_dir.join("TylePlay").join("Backup"));
+    }
+
+    let app_dir = app.path().app_data_dir().map_err(|err| err.to_string())?;
+    Ok(app_dir.join("backups"))
+}
+
+fn perform_auto_backup(app: &AppHandle, state: &AppState) -> Result<String, String> {
+    let backup_dir = resolve_documents_backup_dir(app)?;
+    fs::create_dir_all(&backup_dir).map_err(|err| format!("failed to create backup directory: {err}"))?;
+
+    if let Ok(entries) = fs::read_dir(&backup_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+                if ext.eq_ignore_ascii_case("tyleplaybak") {
+                    let _ = fs::remove_file(&path);
+                }
+            }
+        }
+    }
+
+    let default_filename = format!(
+        "TylePlay_Backup_{}.tyleplaybak",
+        Local::now().format("%Y-%m-%d_%H%M%S")
+    );
+    let dest_path = backup_dir.join(default_filename);
+
+    write_zip_backup(app, state, &dest_path)
+}
+
+fn duration_until_next_2300() -> Duration {
+    let now = Local::now();
+    if let Some(target_today) = now.date_naive().and_hms_opt(23, 0, 0) {
+        if let Some(target_dt) = Local.from_local_datetime(&target_today).single() {
+            if target_dt > now {
+                if let Ok(std_dur) = (target_dt - now).to_std() {
+                    return std_dur;
+                }
+            }
+        }
+    }
+
+    if let Some(tomorrow) = now.date_naive().succ_opt() {
+        if let Some(target_tomorrow) = tomorrow.and_hms_opt(23, 0, 0) {
+            if let Some(target_dt) = Local.from_local_datetime(&target_tomorrow).single() {
+                if target_dt > now {
+                    if let Ok(std_dur) = (target_dt - now).to_std() {
+                        return std_dur;
+                    }
+                }
+            }
+        }
+    }
+
+    Duration::from_secs(3600)
+}
+
+fn start_auto_backup_scheduler(app: AppHandle, state: AppState) {
+    thread::spawn(move || {
+        loop {
+            let sleep_duration = duration_until_next_2300();
+            log::info!(
+                "auto-backup scheduler sleeping for {} seconds until next 23:00 target",
+                sleep_duration.as_secs()
+            );
+            thread::sleep(sleep_duration);
+
+            let now = Local::now();
+            if now.hour() == 23 {
+                match perform_auto_backup(&app, &state) {
+                    Ok(saved_path) => {
+                        log::info!("auto-backup created successfully: {}", saved_path);
+                    }
+                    Err(err) => {
+                        log::warn!("auto-backup failed: {}", err);
+                    }
+                }
+            }
+        }
+    });
+}
+
+#[tauri::command]
+fn trigger_auto_backup(
+    app: AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<String, String> {
+    perform_auto_backup(&app, &state)
+}
+
+#[tauri::command]
+fn export_backup_data(
+    app: AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<Option<String>, String> {
+    let default_filename = format!(
+        "TylePlay_Backup_{}.tyleplaybak",
+        Local::now().format("%Y-%m-%d_%H%M%S")
+    );
+
+    let save_path = rfd::FileDialog::new()
+        .set_title("Export TylePlay Backup")
+        .add_filter("TylePlay Backup (*.tyleplaybak)", &["tyleplaybak"])
+        .add_filter("Zip Archive (*.zip)", &["zip"])
+        .set_file_name(&default_filename)
+        .save_file();
+
+    let Some(dest_path) = save_path else {
+        return Ok(None);
+    };
+
+    let result_path = write_zip_backup(&app, &state, &dest_path)?;
+    Ok(Some(result_path))
 }
 
 #[tauri::command]
@@ -8008,7 +8263,7 @@ fn build_tray_menu<R: tauri::Runtime, M: Manager<R>>(
     manager: &M,
     state: &AppState,
 ) -> Result<Menu<R>, String> {
-    let _ = scan_once_if_stale(state, Duration::from_secs(2));
+    let _ = scan_once_if_stale(state, None, Duration::from_secs(2));
     let active_games = active_games_snapshot(state).unwrap_or_default();
     let recent_games = {
         let conn = state
@@ -8275,6 +8530,34 @@ fn window_close(app: tauri::AppHandle) -> Result<(), String> {
     window.close().map_err(|err| err.to_string())
 }
 
+#[cfg(target_os = "windows")]
+fn register_windows_aumid_and_shortcut() {
+    let app_id_str = "com.artyle.tyleplay";
+    let app_id_u16: Vec<u16> = format!("{app_id_str}\0").encode_utf16().collect();
+    unsafe {
+        windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(app_id_u16.as_ptr());
+    }
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        let exe_str = exe_path.to_string_lossy().to_string();
+        let ps_code = format!(
+            "$appdata = [Environment]::GetFolderPath('ApplicationData'); \
+             $shortcutPath = Join-Path $appdata 'Microsoft\\Windows\\Start Menu\\Programs\\TylePlay.lnk'; \
+             $ws = New-Object -ComObject WScript.Shell; \
+             $s = $ws.CreateShortcut($shortcutPath); \
+             $s.TargetPath = '{exe_str}'; \
+             $s.Description = 'TylePlay Desktop Application'; \
+             $s.Save(); \
+             $code = 'using System; using System.Runtime.InteropServices; public static class AUMIDHelper {{ [DllImport(\"shell32.dll\", SetLastError=true)] public static extern int SHGetPropertyStoreFromParsingName([MarshalAs(UnmanagedType.LPWStr)] string p, IntPtr pbc, int f, ref Guid r, out IPropertyStore s); [StructLayout(LayoutKind.Sequential, Pack=4)] public struct PK {{ public Guid f; public uint p; }} [StructLayout(LayoutKind.Explicit)] public struct PV {{ [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public IntPtr v; }} [ComImport, Guid(\"886D8EEB-8CF2-4446-8D02-CDA11DDCF443\"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)] public interface IPropertyStore {{ int GetCount(out uint c); int GetAt(uint i, out PK k); int GetValue(ref PK k, out PV v); int SetValue(ref PK k, ref PV v); int Commit(); }} public static void SetAppId(string path, string appId) {{ try {{ Guid id = new Guid(\"886D8EEB-8CF2-4446-8D02-CDA11DDCF443\"); IPropertyStore s; if (SHGetPropertyStoreFromParsingName(path, IntPtr.Zero, 2, ref id, out s) == 0 && s != null) {{ PK k = new PK {{ f = new Guid(\"9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3\"), p = 5 }}; PV v = new PV {{ vt = 31, v = Marshal.StringToCoTaskMemUni(appId) }}; s.SetValue(ref k, ref v); s.Commit(); Marshal.FreeCoTaskMem(v.v); }} }} catch {{}} }} }}'; \
+             Add-Type -TypeDefinition $code -ErrorAction SilentlyContinue; \
+             [AUMIDHelper]::SetAppId($shortcutPath, '{app_id_str}');"
+        );
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &ps_code])
+            .spawn();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     write_boot_log("run(): starting builder");
@@ -8329,11 +8612,18 @@ pub fn run() {
         })
         .setup(|app| {
             write_boot_log("setup(): begin");
+            #[cfg(target_os = "windows")]
+            register_windows_aumid_and_shortcut();
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_autostart::init(
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
                 Some(vec![AUTOSTART_ARG]),
             ))?;
+
+            #[cfg(target_os = "windows")]
+            register_windows_aumid_and_shortcut();
+
+            app.handle().plugin(tauri_plugin_notification::init())?;
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -8364,6 +8654,7 @@ pub fn run() {
             write_boot_log("setup(): state initialized");
             build_tray(app, &state)?;
             start_watcher(app.handle().clone(), state.clone());
+            start_auto_backup_scheduler(app.handle().clone(), state.clone());
             let (start_on_system_startup, close_to_system_tray) = {
                 let conn = state
                     .db
@@ -8454,6 +8745,7 @@ pub fn run() {
             clear_local_data,
             export_backup_data,
             import_backup_data,
+            trigger_auto_backup,
             get_igdb_settings,
             save_igdb_settings,
             search_igdb_games,

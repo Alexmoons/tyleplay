@@ -19,6 +19,7 @@ import Sidebar from "./components/Sidebar";
 import AddGameModal from "./components/AddGameModal";
 import AutoScanModal from "./components/AutoScanModal";
 import LoadingIndicator from "./components/LoadingIndicator";
+import GameSessionToast from "./components/GameSessionToast";
 import { CheckCircleIcon, CloseIcon, InfoCircleIcon, RefreshIcon, WarningTriangleIcon } from "./components/icons";
 import ArchivePage from "./pages/ArchivePage";
 import DashboardPage from "./pages/DashboardPage";
@@ -179,6 +180,7 @@ function App() {
     app_theme: "dark",
     top_game_artwork: "capsule",
     playtime_display_mode: "standard",
+    game_notification_mode: "both",
   });
   const [library, setLibrary] = useState([]);
   const [dashboard, setDashboard] = useState(null);
@@ -1662,6 +1664,8 @@ function App() {
                   onImported={handleAddGameAdded}
                   onNotify={pushAppNotice}
                 />
+
+                <GameSessionToast />
               </div>
 
               {loading ? (

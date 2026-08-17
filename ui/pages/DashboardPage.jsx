@@ -485,7 +485,7 @@ export default function DashboardPage({
                     <i className={`dashboard-notification-dot is-${resolveNotificationTone(item.kind)}`} aria-hidden="true" />
                     <div>
                       <strong>{item.game_name || "Unknown game"}</strong>
-                      <span>{formatNotificationDetail(item.kind, item.created_at)}</span>
+                      <span>{formatNotificationDetail(item.kind, item.created_at, item.duration_seconds)}</span>
                     </div>
                   </article>
                 )) : (

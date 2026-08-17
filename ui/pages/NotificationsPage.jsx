@@ -121,7 +121,7 @@ export default function NotificationsPage({ notifications, onBack }) {
                   >
                     {item.game_name || "Unknown game"}
                   </NotificationTooltipAnchor>
-                  <span>{formatNotificationDetail(item.kind, item.created_at)}</span>
+                  <span>{formatNotificationDetail(item.kind, item.created_at, item.duration_seconds)}</span>
                 </div>
               </article>
             ))}
