@@ -78,6 +78,14 @@ Database Location: ```%APPDATA%\com.artyle.tyleplay```
 </table>
 
 ---
+**v2.3.7 (2026-08-18)**
+- [x] Added Database Export & Import functionality.
+- [x] Added toast notifications when a game starts or ends.
+- [x] Added CSV Export buttons to the Daily Playtime and Weekly Playtime pages.
+- [x] Added Automatic Daily Backup at 11:00 PM. Backups are stored in ```...\Documents\TylePlay\Backup```.
+- [x] Fixed Pagination Limits to prevent excessive page buttons on long lists
+- [x] Fixed the Hours-Only Time Format to be properly applied throughout the application.
+
 **v2.3.6 (2026-08-13)**
 - [X] Added game completion status system.
 - [X] Added user ratings and reviews feature.
