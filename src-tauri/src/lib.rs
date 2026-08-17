@@ -3215,8 +3215,8 @@ fn scan_once(state: &AppState, app: Option<&AppHandle>) -> Result<bool, String> 
     {
         let conn = state.db.lock().map_err(|_| "database lock poisoned")?;
         let mut tracker = state.tracker.lock().map_err(|_| "tracker lock poisoned")?;
-        let notif_mode = string_setting_or_default(&conn, "game_notification_mode", "both")
-            .unwrap_or_else(|_| "both".to_string());
+        let notif_mode = string_setting_or_default(&conn, "game_notification_mode", "windows_only")
+            .unwrap_or_else(|_| "windows_only".to_string());
 
         for (exe_name, exe_path) in &snapshot {
             let Some((executable_id, game_id, game_name, status)) =
@@ -5164,7 +5164,7 @@ fn read_app_settings(conn: &Connection) -> Result<AppSettings, String> {
         .unwrap_or_else(|| "standard".to_string());
     let game_notification_mode = get_setting(conn, "game_notification_mode")
         .map_err(|err| err.to_string())?
-        .unwrap_or_else(|| "both".to_string());
+        .unwrap_or_else(|| "windows_only".to_string());
 
     Ok(AppSettings {
         start_on_system_startup,
@@ -7649,7 +7649,7 @@ fn save_app_settings(
         "off" => "off".to_string(),
         "app_only" => "app_only".to_string(),
         "windows_only" => "windows_only".to_string(),
-        _ => "both".to_string(),
+        _ => "windows_only".to_string(),
     };
 
     let conn = state.db.lock().map_err(|_| "database lock poisoned")?;

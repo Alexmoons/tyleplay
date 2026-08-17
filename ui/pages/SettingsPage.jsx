@@ -299,7 +299,7 @@ export default function SettingsPage({
       appTheme: String(nextSettings.app_theme || "dark"),
       topGameArtwork: String(nextSettings.top_game_artwork || "capsule"),
       playtimeDisplayMode: String(nextSettings.playtime_display_mode || "standard"),
-      gameNotificationMode: String(nextSettings.game_notification_mode || "both"),
+      gameNotificationMode: String(nextSettings.game_notification_mode || "windows_only"),
     });
   }
 
@@ -703,7 +703,7 @@ export default function SettingsPage({
               control={(
                 <InlineSelect
                   icon={<MonitorIcon />}
-                  value={generalSettings.game_notification_mode || "both"}
+                  value={generalSettings.game_notification_mode || "windows_only"}
                   options={GAME_NOTIFICATION_MODE_OPTIONS}
                   disabled={false}
                   onChange={(value) => handleGeneralChange(

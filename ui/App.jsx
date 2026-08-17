@@ -180,7 +180,7 @@ function App() {
     app_theme: "dark",
     top_game_artwork: "capsule",
     playtime_display_mode: "standard",
-    game_notification_mode: "both",
+    game_notification_mode: "windows_only",
   });
   const [library, setLibrary] = useState([]);
   const [dashboard, setDashboard] = useState(null);
