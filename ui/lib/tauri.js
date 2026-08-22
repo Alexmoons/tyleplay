@@ -510,6 +510,27 @@ const mockGameDetails = {
   }
 };
 
+const mockEmulatorProfiles = [
+  {
+    id: 1,
+    name: "PCSX2 (PlayStation 2)",
+    exe_path: "C:\\Emulators\\PCSX2\\pcsx2-qt.exe",
+    default_args: "-nogui -fullscreen -- \"{rom_path}\"",
+    platform: "Sony PlayStation 2",
+    created_at: mockNow - 86400 * 10,
+    updated_at: mockNow - 86400 * 10,
+  },
+  {
+    id: 2,
+    name: "RPCS3 (PlayStation 3)",
+    exe_path: "C:\\Emulators\\RPCS3\\rpcs3.exe",
+    default_args: "--no-gui \"{rom_path}\"",
+    platform: "Sony PlayStation 3",
+    created_at: mockNow - 86400 * 8,
+    updated_at: mockNow - 86400 * 8,
+  }
+];
+
 for (const game of mockLibrary) {
   if (typeof game.is_favorite !== "boolean") {
     game.is_favorite = false;
@@ -1438,6 +1459,46 @@ export async function invoke(command, args) {
 
   if (command === "launch_game") {
     return null;
+  }
+
+  if (command === "get_emulator_profiles") {
+    return mockEmulatorProfiles;
+  }
+
+  if (command === "save_emulator_profile") {
+    const input = args?.input || {};
+    const now = Math.floor(Date.now() / 1000);
+    if (input.id) {
+      const idx = mockEmulatorProfiles.findIndex(p => p.id === input.id);
+      if (idx !== -1) {
+        mockEmulatorProfiles[idx] = { ...mockEmulatorProfiles[idx], ...input, updated_at: now };
+        return mockEmulatorProfiles[idx];
+      }
+    }
+    const newProfile = {
+      id: Date.now(),
+      name: input.name,
+      exe_path: input.exe_path,
+      default_args: input.default_args || null,
+      platform: input.platform || null,
+      created_at: now,
+      updated_at: now,
+    };
+    mockEmulatorProfiles.push(newProfile);
+    return newProfile;
+  }
+
+  if (command === "delete_emulator_profile") {
+    const id = Number(args?.id || 0);
+    const idx = mockEmulatorProfiles.findIndex(p => p.id === id);
+    if (idx !== -1) {
+      mockEmulatorProfiles.splice(idx, 1);
+    }
+    return null;
+  }
+
+  if (command === "pick_rom_path") {
+    return "C:\\Games\\Emulation\\ROMs\\Final Fantasy X.iso";
   }
 
   throw new Error(`Unsupported mock command: ${command}`);

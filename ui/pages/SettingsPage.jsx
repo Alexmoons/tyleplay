@@ -9,6 +9,7 @@ import {
   DatabaseIcon,
   ExportIcon,
   FacebookIcon,
+  GamepadOutlineIcon,
   GithubIcon,
   GlobeIcon,
   ImportIcon,
@@ -24,6 +25,7 @@ import {
   UserIcon,
 } from "../components/icons";
 import UserSettingsTab from "./settings/UserSettingsTab";
+import EmulatorsSettingsTab from "./settings/EmulatorsSettingsTab";
 import {
   DEFAULT_USER_SETTINGS,
   buildSocialLinksFromUserSettings,
@@ -35,6 +37,7 @@ import {
 
 const SETTINGS_TABS = [
   { id: "general", label: "General", icon: <CogIcon /> },
+  { id: "emulators", label: "Emulators", icon: <GamepadOutlineIcon /> },
   { id: "advance", label: "Advanced", icon: <ShieldIcon /> },
   { id: "user", label: "User", icon: <UserIcon /> },
   { id: "about", label: "About", icon: <InfoCircleIcon /> },
@@ -762,6 +765,12 @@ export default function SettingsPage({
               noDivider
             />
           </section>
+        </section>
+      ) : null}
+
+      {activeTab === "emulators" ? (
+        <section className="settings-content-shell settings-content-general">
+          <EmulatorsSettingsTab onNotify={onNotify} />
         </section>
       ) : null}
 

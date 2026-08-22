@@ -18,6 +18,9 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
   const [saving, setSaving] = useState(false);
   const [savingMode, setSavingMode] = useState("");
   const [pickingExe, setPickingExe] = useState(false);
+  const [pickingRom, setPickingRom] = useState(false);
+  const [pickingEmulatorExe, setPickingEmulatorExe] = useState(false);
+  const [emulatorProfiles, setEmulatorProfiles] = useState([]);
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState([]);
   const [archiveCandidates, setArchiveCandidates] = useState([]);
@@ -49,6 +52,23 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
   }
 
   useEffect(() => {
+    if (open) {
+      invoke("get_emulator_profiles")
+        .then((profiles) => {
+          const list = Array.isArray(profiles) ? profiles : [];
+          setEmulatorProfiles(list);
+          if (list.length > 0) {
+            setForm((prev) => ({
+              ...prev,
+              emulatorId: prev.emulatorId ?? list[0].id,
+            }));
+          }
+        })
+        .catch(() => setEmulatorProfiles([]));
+    }
+  }, [open]);
+
+  useEffect(() => {
     if (!open) {
       setForm(createEmptyForm());
       setHasName(false);
@@ -56,6 +76,7 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
       setSaving(false);
       setSavingMode("");
       setPickingExe(false);
+      setPickingRom(false);
       setSearching(false);
       setResults([]);
       setArchiveCandidates([]);
@@ -88,7 +109,6 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
         }
         if (archiveChoiceOpen) {
           setArchiveChoiceOpen(false);
-          setArchiveChoiceError("");
           return;
         }
         if (duplicateWarning) {
@@ -99,11 +119,11 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
       }
     }
 
-    document.addEventListener("keydown", handleEscape);
+    window.addEventListener("keydown", handleEscape);
     return () => {
-      document.removeEventListener("keydown", handleEscape);
+      window.removeEventListener("keydown", handleEscape);
     };
-  }, [archiveChoiceOpen, duplicateWarning, isExeHelpOpen, onClose, open, saving]);
+  }, [open, saving, isExeHelpOpen, archiveChoiceOpen, duplicateWarning, onClose]);
 
   useEffect(() => {
     if (!open || !isSuggestionOpen) {
@@ -120,7 +140,7 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown);
     };
-  }, [isSuggestionOpen, open]);
+  }, [open, isSuggestionOpen]);
 
   useEffect(() => {
     if (!open) {
@@ -184,16 +204,24 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
     };
   }, [open, searchQuery, selectedIgdb]);
 
-  const canSubmit = useMemo(
-    () => !saving,
-    [saving]
-  );
-  const showSuggestionPopup = hasSearched && isSuggestionOpen && hasName && (results.length > 0 || searching || !selectedIgdb);
-  const exeHelpContent = useMemo(() => buildExeHelpContent(exeHelpMarkdown), []);
-
-  function updateField(key, value) {
-    setForm((current) => ({ ...current, [key]: value }));
+  function updateField(field, value) {
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
   }
+
+  const isEmulator = form?.gameType === "emulator";
+  const romPath = String(form?.romPath || "").trim();
+  const exePath = String(form?.exePath || "").trim();
+  const canSubmit = !saving && hasName && (
+    isEmulator
+      ? (romPath.length > 0 && form?.emulatorId != null)
+      : exePath.length > 0
+  );
+
+  const showSuggestionPopup = isSuggestionOpen && (hasSearched || searching || results.length > 0);
+  const exeHelpContent = useMemo(() => buildExeHelpContent(exeHelpMarkdown), []);
 
   function hasQuotedExePath(value) {
     return /['"]/.test(String(value || ""));
@@ -202,8 +230,8 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
   function notifyQuotedExePath() {
     notifyAddGame({
       tone: "warning",
-      title: "Invalid executable path.",
-      message: "Exe Path cannot contain quotation marks. Remove any single or double quotes first.",
+      title: "Invalid file path.",
+      message: "Path cannot contain quotation marks. Remove any single or double quotes first.",
     });
   }
 
@@ -211,7 +239,9 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
     notifyAddGame({
       tone: "warning",
       title: "Required fields are missing.",
-      message: "Game Name and Exe Path must both be filled in before adding a game.",
+      message: isEmulator
+        ? "Game Name, Emulator Profile, and ROM File must all be specified before adding a game."
+        : "Game Name and Exe Path must both be filled in before adding a game.",
     });
   }
 
@@ -255,11 +285,45 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
     }
   }
 
+  async function handleBrowseRom() {
+    setPickingRom(true);
+
+    try {
+      const selectedProfile = (emulatorProfiles || []).find((p) => p?.id === form?.emulatorId);
+      const emuName = selectedProfile?.name || selectedProfile?.platform || "";
+      const selectedPath = await invoke("pick_rom_path", { emulatorName: emuName || null });
+      if (selectedPath) {
+        updateField("romPath", selectedPath);
+        if (!nameValueRef.current.trim()) {
+          const fileName = selectedPath.split(/[/\\]/).pop() || "";
+          const cleanName = fileName.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ").trim();
+          if (cleanName) {
+            if (nameInputRef.current) {
+              nameInputRef.current.value = cleanName;
+            }
+            nameValueRef.current = cleanName;
+            setHasName(true);
+          }
+        }
+      }
+    } catch (nextError) {
+      notifyAddGameError("Unable to choose ROM file.", nextError);
+    } finally {
+      setPickingRom(false);
+    }
+  }
+
   async function submitAddGame(options = {}) {
-    if (hasQuotedExePath(form.exePath)) {
+    const isEmu = form?.gameType === "emulator";
+    const targetPath = isEmu ? String(form?.romPath || "").trim() : String(form?.exePath || "").trim();
+    if (hasQuotedExePath(targetPath)) {
       notifyQuotedExePath();
       return;
     }
+
+    const selectedProfile = (emulatorProfiles || []).find((p) => p?.id === form?.emulatorId);
+    const emuExe = selectedProfile?.exePath || selectedProfile?.exe_path || "";
+    const emuArgs = selectedProfile?.defaultArgs || selectedProfile?.default_args || "";
 
     setSaving(true);
     setSavingMode("add");
@@ -267,11 +331,16 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
     try {
       const result = await invoke("add_game", {
         gameName: nameValueRef.current.trim(),
-        exePath: form.exePath.trim(),
-        store: form.store || null,
+        exePath: targetPath,
+        store: form?.store || (isEmu ? "Emulator" : null),
         coverUrl: selectedIgdb?.cover_url || null,
         igdbId: selectedIgdb?.id || null,
         skipArchiveRestore: Boolean(options.skipArchiveRestore),
+        gameType: form?.gameType || "pc",
+        romPath: isEmu ? String(form?.romPath || "").trim() : null,
+        emulatorId: isEmu ? (form?.emulatorId ?? null) : null,
+        emulatorExePath: isEmu ? emuExe : null,
+        launchArguments: isEmu ? emuArgs : null,
       });
       await onAdded?.(result && typeof result === "object" ? result : null);
       onClose?.();
@@ -289,20 +358,37 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
       return;
     }
 
-    if (!nameValueRef.current.trim() || !form.exePath.trim()) {
+    if (!nameValueRef.current.trim()) {
       notifyMissingRequiredFields();
       return;
     }
 
-    if (hasQuotedExePath(form.exePath)) {
+    const isEmu = form?.gameType === "emulator";
+    const curRomPath = String(form?.romPath || "").trim();
+    const curExePath = String(form?.exePath || "").trim();
+
+    if (isEmu) {
+      if (!curRomPath || form?.emulatorId == null) {
+        notifyMissingRequiredFields();
+        return;
+      }
+    } else if (!curExePath) {
+      notifyMissingRequiredFields();
+      return;
+    }
+
+    const targetPath = isEmu ? curRomPath : curExePath;
+    if (hasQuotedExePath(targetPath)) {
       notifyQuotedExePath();
       return;
     }
 
     try {
       const preflight = await invoke("preflight_add_game", {
-        exePath: form.exePath.trim(),
+        exePath: targetPath,
         igdbId: selectedIgdb?.id || null,
+        gameType: form?.gameType || "pc",
+        romPath: isEmu ? curRomPath : null,
       });
 
       if (preflight?.duplicate_igdb_game) {
@@ -319,7 +405,7 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
       if (preflight?.executable_conflict_message) {
         notifyAddGame({
           tone: "warning",
-          title: "Executable already used.",
+          title: "File already used.",
           message: preflight.executable_conflict_message,
         });
         return;
@@ -375,68 +461,65 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
                 matchRatio,
                 queryLengthDelta: Math.abs(normalizedTitle.length - String(nameValueRef.current || "").trim().length),
                 candidateTokenCount: candidateTokens.length,
-                startsWithQuery,
               };
             })
             .filter(Boolean)
-            .sort((left, right) =>
-              Number(right.exactNormalizedMatch) - Number(left.exactNormalizedMatch)
-              || Number(right.includesWholeQuery) - Number(left.includesWholeQuery)
-              || Number(right.startsWithQuery) - Number(left.startsWithQuery)
-              || right.matchRatio - left.matchRatio
-              || right.matchedTokens - left.matchedTokens
-              || left.queryLengthDelta - right.queryLengthDelta
-              || left.candidateTokenCount - right.candidateTokenCount
-              || String(left.item?.name || "").localeCompare(String(right.item?.name || ""))
-            )
+            .sort((a, b) => {
+              if (a.exactNormalizedMatch !== b.exactNormalizedMatch) {
+                return a.exactNormalizedMatch ? -1 : 1;
+              }
+              if (a.includesWholeQuery !== b.includesWholeQuery) {
+                return a.includesWholeQuery ? -1 : 1;
+              }
+              if (a.startsWithQuery !== b.startsWithQuery) {
+                return a.startsWithQuery ? -1 : 1;
+              }
+              if (b.matchRatio !== a.matchRatio) {
+                return b.matchRatio - a.matchRatio;
+              }
+              if (b.matchedTokens !== a.matchedTokens) {
+                return b.matchedTokens - a.matchedTokens;
+              }
+              return a.queryLengthDelta - b.queryLengthDelta;
+            })
             .map((entry) => entry.item)
-            .slice(0, 6)
         : [];
-      if (candidateItems.length) {
+
+      if (candidateItems.length > 0) {
         setArchiveCandidates(candidateItems);
         setSelectedArchiveId(candidateItems[0]?.archive_id ?? null);
-        setArchiveChoiceError("");
         setArchiveChoiceOpen(true);
+        setArchiveChoiceError("");
         return;
       }
     } catch {
-      // Keep normal add flow if archive lookup fails.
+      // Continue add flow if archive candidate search fails
     }
 
     await submitAddGame();
   }
 
-  async function handleDuplicateContinue() {
-    setDuplicateWarning(null);
-    await proceedWithAddFlow();
-  }
-
-  async function handleContinueWithoutRestore() {
+  function handleContinueWithoutRestore() {
     setArchiveChoiceOpen(false);
-    setArchiveChoiceError("");
-    await submitAddGame({ skipArchiveRestore: true });
+    setSelectedArchiveId(null);
+    setArchiveCandidates([]);
+    submitAddGame({ skipArchiveRestore: true });
   }
 
   async function handleContinueRestore() {
-    const candidate = archiveCandidates.find((item) => Number(item.archive_id) === Number(selectedArchiveId));
-    if (!candidate) {
-      setArchiveChoiceError("select one archive candidate first");
-      notifyAddGame({
-        tone: "warning",
-        title: "Select an archive candidate.",
-        message: "Choose one candidate before continuing restore.",
-      });
+    if (!selectedArchiveId) {
+      setArchiveChoiceError("Select one archive candidate first.");
       return;
     }
 
     setSaving(true);
     setSavingMode("restore");
-    setArchiveChoiceError("");
 
     try {
+      const targetPath = isEmulator ? form.romPath.trim() : form.exePath.trim();
       const result = await invoke("restore_archived_game_entry", {
-        archiveId: Number(candidate.archive_id),
-        exePath: form.exePath.trim(),
+        archiveId: Number(selectedArchiveId),
+        exePath: targetPath,
       });
       await onAdded?.(result && typeof result === "object" ? result : null);
       onClose?.();
@@ -448,6 +531,11 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
       setSaving(false);
       setSavingMode("");
     }
+  }
+
+  function handleDuplicateContinue() {
+    setDuplicateWarning(null);
+    proceedWithAddFlow();
   }
 
   if (!open) {
@@ -480,6 +568,57 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
         </div>
 
         <form className="add-game-form" onSubmit={handleSubmit}>
+          {/* Game Type Segmented Switch */}
+          <div
+            style={{
+              display: "flex",
+              gap: "0.35rem",
+              background: "#222222",
+              padding: "0.3rem",
+              borderRadius: "9999px",
+              marginBottom: "0.5rem",
+            }}
+          >
+            <button
+              type="button"
+              style={{
+                flex: 1,
+                padding: "0.5rem 1rem",
+                borderRadius: "9999px",
+                border: 0,
+                cursor: "pointer",
+                fontWeight: 600,
+                fontSize: "0.84rem",
+                background: form.gameType === "pc" ? "#333333" : "transparent",
+                color: form.gameType === "pc" ? "#ffffff" : "#999999",
+                boxShadow: form.gameType === "pc" ? "0 2px 8px rgba(0, 0, 0, 0.35)" : "none",
+                transition: "all 0.18s ease",
+              }}
+              onClick={() => updateField("gameType", "pc")}
+            >
+              PC Game
+            </button>
+            <button
+              type="button"
+              style={{
+                flex: 1,
+                padding: "0.5rem 1rem",
+                borderRadius: "9999px",
+                border: 0,
+                cursor: "pointer",
+                fontWeight: 600,
+                fontSize: "0.84rem",
+                background: form.gameType === "emulator" ? "#333333" : "transparent",
+                color: form.gameType === "emulator" ? "#ffffff" : "#999999",
+                boxShadow: form.gameType === "emulator" ? "0 2px 8px rgba(0, 0, 0, 0.35)" : "none",
+                transition: "all 0.18s ease",
+              }}
+              onClick={() => updateField("gameType", "emulator")}
+            >
+              Emulator ROM
+            </button>
+          </div>
+
           <label ref={autocompleteRef} className="edit-game-field add-game-autocomplete">
             <span>Game Name *</span>
             <div className="add-game-name-wrap">
@@ -551,46 +690,108 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
             ) : null}
           </label>
 
-          <label className="edit-game-field">
-            <div className="edit-game-field-label-row">
-              <span className="edit-game-field-label">Exe Path *</span>
-              <button
-                type="button"
-                className="add-game-help-trigger"
-                aria-label="How to add a game executable"
-                onClick={() => setIsExeHelpOpen(true)}
-              >
-                <InfoCircleIcon />
-              </button>
-            </div>
-            <div className="edit-game-input-with-action">
-              <input
-                value={form.exePath}
-                onChange={(event) => updateField("exePath", event.target.value)}
-                placeholder="Choose a .exe file"
-                autoComplete="off"
-              />
-              <button
-                type="button"
-                className="action-button action-button-browse"
-                onClick={handleBrowseExe}
-                disabled={pickingExe || saving}
-              >
-                <FolderIcon />
-                <span>{pickingExe ? "Browsing..." : "Browse"}</span>
-              </button>
-            </div>
-          </label>
+          {isEmulator ? (
+            <>
+              <div className="edit-game-field">
+                <span>Emulator Profile *</span>
+                <PopupSelect
+                  value={
+                    (emulatorProfiles || []).find((p) => p?.id === form.emulatorId)?.name || ""
+                  }
+                  options={
+                    Array.isArray(emulatorProfiles)
+                      ? emulatorProfiles.map((p) => p?.name).filter(Boolean)
+                      : []
+                  }
+                  placeholder={
+                    (emulatorProfiles || []).length > 0
+                      ? "Select emulator profile"
+                      : "No emulator profiles configured"
+                  }
+                  onChange={(selectedName) => {
+                    const matchedProfile = (emulatorProfiles || []).find((p) => p?.name === selectedName);
+                    if (matchedProfile) {
+                      setForm((prev) => ({
+                        ...prev,
+                        emulatorId: matchedProfile.id,
+                      }));
+                    } else {
+                      setForm((prev) => ({
+                        ...prev,
+                        emulatorId: null,
+                      }));
+                    }
+                  }}
+                />
+              </div>
 
-          <div className="edit-game-field">
-            <span>Store</span>
-            <PopupSelect
-              value={form.store}
-              options={STORE_OPTIONS}
-              placeholder="Select store"
-              onChange={(value) => updateField("store", value)}
-            />
-          </div>
+              <label className="edit-game-field">
+                <div className="edit-game-field-label-row">
+                  <span className="edit-game-field-label">ROM File *</span>
+                </div>
+                <div className="edit-game-input-with-action">
+                  <input
+                    value={form.romPath || ""}
+                    onChange={(event) => updateField("romPath", event.target.value)}
+                    placeholder="Choose a ROM file (.iso, .bin, .chd, .cso, etc.)"
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    className="action-button action-button-browse"
+                    onClick={handleBrowseRom}
+                    disabled={pickingRom || saving}
+                  >
+                    <FolderIcon />
+                    <span>{pickingRom ? "Browsing..." : "Browse"}</span>
+                  </button>
+                </div>
+              </label>
+            </>
+          ) : (
+            <>
+              <label className="edit-game-field">
+                <div className="edit-game-field-label-row">
+                  <span className="edit-game-field-label">Exe Path *</span>
+                  <button
+                    type="button"
+                    className="add-game-help-trigger"
+                    aria-label="How to add a game executable"
+                    onClick={() => setIsExeHelpOpen(true)}
+                  >
+                    <InfoCircleIcon />
+                  </button>
+                </div>
+                <div className="edit-game-input-with-action">
+                  <input
+                    value={form.exePath || ""}
+                    onChange={(event) => updateField("exePath", event.target.value)}
+                    placeholder="Choose a .exe file"
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    className="action-button action-button-browse"
+                    onClick={handleBrowseExe}
+                    disabled={pickingExe || saving}
+                  >
+                    <FolderIcon />
+                    <span>{pickingExe ? "Browsing..." : "Browse"}</span>
+                  </button>
+                </div>
+              </label>
+
+              <div className="edit-game-field">
+                <span>Store</span>
+                <PopupSelect
+                  value={form.store}
+                  options={STORE_OPTIONS}
+                  placeholder="Select store"
+                  onChange={(value) => updateField("store", value)}
+                />
+              </div>
+            </>
+          )}
 
           <div className="confirm-modal-actions add-game-actions" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", marginTop: "1.2rem" }}>
             <div />
@@ -599,7 +800,7 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
               <button type="button" className="action-button action-button-danger" onClick={onClose} disabled={saving}>
                 Cancel
               </button>
-              <button type="submit" className="action-button action-button-primary" disabled={!canSubmit}>
+              <button type="submit" className="action-button action-button-primary" disabled={saving}>
                 <span>{saving ? "Adding..." : "Add Game"}</span>
               </button>
             </div>
@@ -867,8 +1068,11 @@ function PopupSelect({ value, options, placeholder, onChange }) {
 
 function createEmptyForm() {
   return {
+    gameType: "pc",
     exePath: "",
     store: "",
+    romPath: "",
+    emulatorId: null,
   };
 }
 
