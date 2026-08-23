@@ -2216,9 +2216,9 @@ fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
     let _ = conn.execute("ALTER TABLE games ADD COLUMN game_type TEXT NOT NULL DEFAULT 'pc'", []);
     let _ = conn.execute("ALTER TABLE games ADD COLUMN rom_path TEXT", []);
     let _ = conn.execute("ALTER TABLE games ADD COLUMN emulator_id INTEGER", []);
-    let _ = conn.execute("ALTER TABLE games ADD COLUMN emulator_exe_path TEXT", []);
-    let _ = conn.execute("ALTER TABLE games ADD COLUMN launch_arguments TEXT", []);
     let _ = conn.execute("ALTER TABLE games ADD COLUMN emulator_profile_name TEXT", []);
+    let _ = conn.execute("ALTER TABLE games DROP COLUMN emulator_exe_path", []);
+    let _ = conn.execute("ALTER TABLE games DROP COLUMN launch_arguments", []);
     let _ = conn.execute(
         "
     CREATE TABLE IF NOT EXISTS emulator_profiles (
@@ -2234,15 +2234,11 @@ fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
         [],
     );
     let _ = conn.execute(
-        "UPDATE games SET emulator_exe_path = NULL, launch_arguments = NULL",
-        [],
-    );
-    let _ = conn.execute(
         "UPDATE games SET emulator_id = NULL, rom_path = NULL WHERE game_type != 'emulator' OR game_type IS NULL",
         [],
     );
     let _ = conn.execute(
-        "UPDATE emulator_profiles SET default_args = TRIM(REPLACE(REPLACE(REPLACE(COALESCE(default_args, ''), '\"{rom_path}\"', ''), '{rom_path}', ''), '--', ''))",
+        "UPDATE emulator_profiles SET default_args = TRIM(REPLACE(REPLACE(COALESCE(default_args, ''), '\"{rom_path}\"', ''), '{rom_path}', '')) WHERE default_args LIKE '%{rom_path}%'",
         [],
     );
     // Backfill emulator_profile_name for existing games with an emulator_id
@@ -2279,6 +2275,18 @@ fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
            AND (
                LOWER(COALESCE(rom_path, '')) LIKE '%ps1%'
                OR LOWER(COALESCE(platforms_json, '')) LIKE '%playstation%'
+           )",
+        [],
+    );
+    // Backfill emulator_profile_name for PSP games that were orphaned
+    let _ = conn.execute(
+        "UPDATE games
+         SET emulator_profile_name = 'PPSSPP'
+         WHERE game_type = 'emulator'
+           AND (emulator_profile_name IS NULL OR emulator_profile_name = '')
+           AND (
+               LOWER(COALESCE(rom_path, '')) LIKE '%psp%'
+               OR LOWER(COALESCE(platforms_json, '')) LIKE '%playstation portable%'
            )",
         [],
     );
@@ -2375,8 +2383,8 @@ fn run_archive_migrations(conn: &Connection) -> rusqlite::Result<()> {
     let _ = conn.execute("ALTER TABLE archive_sessions ADD COLUMN note TEXT", []);
     let _ = conn.execute("ALTER TABLE archive_games ADD COLUMN game_type TEXT NOT NULL DEFAULT 'pc'", []);
     let _ = conn.execute("ALTER TABLE archive_games ADD COLUMN rom_path TEXT", []);
-    let _ = conn.execute("ALTER TABLE archive_games ADD COLUMN emulator_exe_path TEXT", []);
-    let _ = conn.execute("ALTER TABLE archive_games ADD COLUMN launch_arguments TEXT", []);
+    let _ = conn.execute("ALTER TABLE archive_games DROP COLUMN emulator_exe_path", []);
+    let _ = conn.execute("ALTER TABLE archive_games DROP COLUMN launch_arguments", []);
     Ok(())
 }
 
@@ -5443,7 +5451,6 @@ fn add_game(
         }
     }
 
-    let norm_emu_exe = emulator_exe_path.map(|p| normalize_exe_path(&p));
     let norm_rom_path = rom_path.map(|p| normalize_exe_path(&p)).or_else(|| is_emulator.then_some(final_exe_path.clone()));
 
     let emu_profile_name: Option<String> = if let Some(emu_id) = emulator_id {
@@ -5453,8 +5460,8 @@ fn add_game(
     };
 
     conn.execute(
-        "INSERT INTO games (name, store, cover_url, backdrop_url, igdb_id, game_type, rom_path, emulator_id, emulator_profile_name, emulator_exe_path, launch_arguments, created_at, updated_at)
-         VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
+        "INSERT INTO games (name, store, cover_url, backdrop_url, igdb_id, game_type, rom_path, emulator_id, emulator_profile_name, created_at, updated_at)
+         VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
         params![
             game_name,
             store,
@@ -5464,8 +5471,6 @@ fn add_game(
             norm_rom_path,
             emulator_id,
             emu_profile_name,
-            norm_emu_exe,
-            launch_arguments,
             now
         ],
     )
@@ -6160,8 +6165,6 @@ fn update_game_metadata(
         rom_path = COALESCE(?27, rom_path),
         emulator_id = COALESCE(?28, emulator_id),
         emulator_profile_name = COALESCE(?29, emulator_profile_name),
-        emulator_exe_path = COALESCE(?30, emulator_exe_path),
-        launch_arguments = COALESCE(?31, launch_arguments),
         metadata_locked = 1,
         updated_at = ?24
       WHERE id = ?1
@@ -6197,19 +6200,30 @@ fn update_game_metadata(
                 now,
                 completion_status,
                 input.game_type,
-                input.rom_path.map(|p| normalize_exe_path(&p)),
+                input.rom_path.as_deref().map(normalize_exe_path),
                 input.emulator_id,
                 input.emulator_id.and_then(|emu_id| {
                     conn.query_row("SELECT name FROM emulator_profiles WHERE id = ?1", params![emu_id], |r| r.get::<_, String>(0)).optional().unwrap_or(None)
                 }),
-                input.emulator_exe_path.map(|p| normalize_exe_path(&p)),
-                input.launch_arguments,
             ],
         )
         .map_err(|err| err.to_string())?;
 
     if updated == 0 {
         return Err("game not found".to_string());
+    }
+
+    if let Some(rom_p) = input.rom_path.as_ref() {
+        let norm_rom = normalize_exe_path(rom_p);
+        let rom_name = Path::new(&norm_rom)
+            .file_name()
+            .and_then(|v| v.to_str())
+            .map(normalize_exe_name)
+            .unwrap_or_default();
+        let _ = conn.execute(
+            "UPDATE executables SET exe_path = ?1, exe_name = ?2, exe_path_display = ?3, updated_at = ?4 WHERE game_id = ?5",
+            params![norm_rom, rom_name, display_exe_path(&norm_rom), now, input.game_id],
+        );
     }
 
     Ok(())

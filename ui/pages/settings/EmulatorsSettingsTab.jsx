@@ -22,13 +22,13 @@ const EMULATOR_PRESETS = [
   {
     name: "PCSX2",
     platform: "PlayStation 2",
-    defaultArgs: "-fullscreen -nogui",
+    defaultArgs: "-batch -nogui -fullscreen",
     hint: "Sony PlayStation 2",
   },
   {
     name: "DuckStation",
     platform: "PlayStation 1",
-    defaultArgs: "-batch -fullscreen",
+    defaultArgs: "-batch -nogui -fullscreen",
     hint: "Sony PlayStation 1",
   },
   {
@@ -36,6 +36,12 @@ const EMULATOR_PRESETS = [
     platform: "PlayStation 1",
     defaultArgs: "-nogui -loadbin",
     hint: "Sony PlayStation 1",
+  },
+  {
+    name: "PPSSPP",
+    platform: "PlayStation Portable",
+    defaultArgs: "--fullscreen --pause-menu-exit",
+    hint: "Sony PlayStation Portable (PSP)",
   },
 ];
 

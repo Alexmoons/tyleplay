@@ -2,29 +2,28 @@ use std::path::Path;
 use std::process::Command;
 use super::{normalize_for_match, parse_cmd_arguments, EmuGameInfo, EmulatorHandler, ProcessInfo};
 
-pub struct DuckstationHandler;
+pub struct PpssppHandler;
 
-impl EmulatorHandler for DuckstationHandler {
+impl EmulatorHandler for PpssppHandler {
     fn name(&self) -> &'static str {
-        "DuckStation"
+        "PPSSPP"
     }
 
     fn matches(&self, proc_exe_lower: &str, emu_exe_lower: &str) -> bool {
-        proc_exe_lower.contains("duckstation")
-            && (emu_exe_lower.contains("duckstation") || emu_exe_lower.is_empty())
+        proc_exe_lower.contains("ppsspp")
+            && (emu_exe_lower.contains("ppsspp") || emu_exe_lower.is_empty())
     }
 
     fn is_idle_window(&self, title: &str) -> bool {
         let t = title.trim().to_lowercase();
-        if t == "duckstation" {
+        if t == "ppsspp" {
             return true;
         }
-        if t.starts_with("duckstation") {
+        if t.starts_with("ppsspp") {
             let is_game_window = (t.contains(" - ")
                 && !t.contains("game list")
                 && !t.contains("settings")
-                && !t.contains("preview")
-                && !t.contains("nogui"))
+                && !t.contains("recent"))
                 || t.contains(" | ")
                 || t.contains("fps")
                 || t.contains("speed:")
@@ -98,10 +97,8 @@ impl EmulatorHandler for DuckstationHandler {
         let template = user_args.trim();
 
         if template.is_empty() {
-            cmd.arg("-batch");
-            cmd.arg("-nogui");
-            cmd.arg("-fullscreen");
-            cmd.arg("--");
+            cmd.arg("--fullscreen");
+            cmd.arg("--pause-menu-exit");
             cmd.arg(rom_path);
         } else if template.contains("{rom_path}") {
             let replaced = template.replace("{rom_path}", rom_path);
@@ -110,9 +107,6 @@ impl EmulatorHandler for DuckstationHandler {
         } else {
             let parsed_args = parse_cmd_arguments(template);
             cmd.args(&parsed_args);
-            if !parsed_args.iter().any(|a| a == "--") {
-                cmd.arg("--");
-            }
             cmd.arg(rom_path);
         }
     }
@@ -120,16 +114,35 @@ impl EmulatorHandler for DuckstationHandler {
     fn configure_file_dialog(&self, dialog: rfd::FileDialog) -> rfd::FileDialog {
         dialog
             .add_filter(
-                "Supported PS1 Images",
-                &[
-                    "cue", "chd", "iso", "bin", "img", "mdf", "pbp", "cso", "zso", "ecm", "exe",
-                ],
+                "Supported PSP Games / UMD Images",
+                &["iso", "cso", "chd", "pbp", "elf", "prx", "zip"],
             )
-            .add_filter("Cue Sheets (.cue)", &["cue"])
-            .add_filter("CHD Compressed Images (.chd)", &["chd"])
-            .add_filter("Raw Disc Images (.bin / .iso / .img)", &["iso", "bin", "img"])
-            .add_filter("PSP / PS1 Eboot (.pbp)", &["pbp"])
-            .add_filter("Media Descriptor (.mdf)", &["mdf"])
+            .add_filter("ISO Disc Images (.iso)", &["iso"])
+            .add_filter("Compressed Images (.cso / .chd)", &["cso", "chd"])
+            .add_filter("PSP Eboot (.pbp)", &["pbp"])
+            .add_filter("Homebrew Executables (.elf / .prx)", &["elf", "prx"])
             .add_filter("All Files", &["*"])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ppsspp_matches() {
+        let handler = PpssppHandler;
+        assert_eq!(handler.name(), "PPSSPP");
+        assert!(handler.matches("ppssppwindows64.exe", "ppssppwindows64.exe"));
+        assert!(handler.matches("ppsspp.exe", ""));
+    }
+
+    #[test]
+    fn test_ppsspp_idle_and_active_detection() {
+        let handler = PpssppHandler;
+        assert!(handler.is_idle_window("PPSSPP"));
+        assert!(handler.is_idle_window("PPSSPP v1.18.1"));
+        assert!(!handler.is_idle_window("PPSSPP v1.18.1 - Crisis Core [ULUS10336]"));
+    }
+}
+

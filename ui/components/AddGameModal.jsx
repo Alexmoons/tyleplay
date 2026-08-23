@@ -321,10 +321,6 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
       return;
     }
 
-    const selectedProfile = (emulatorProfiles || []).find((p) => p?.id === form?.emulatorId);
-    const emuExe = selectedProfile?.exePath || selectedProfile?.exe_path || "";
-    const emuArgs = selectedProfile?.defaultArgs || selectedProfile?.default_args || "";
-
     setSaving(true);
     setSavingMode("add");
 
@@ -339,8 +335,8 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
         gameType: form?.gameType || "pc",
         romPath: isEmu ? String(form?.romPath || "").trim() : null,
         emulatorId: isEmu ? (form?.emulatorId ?? null) : null,
-        emulatorExePath: isEmu ? emuExe : null,
-        launchArguments: isEmu ? emuArgs : null,
+        emulatorExePath: null,
+        launchArguments: null,
       });
       await onAdded?.(result && typeof result === "object" ? result : null);
       onClose?.();

@@ -18,6 +18,7 @@ const MAX_GAME_NAME_LENGTH = 360;
 export default function EditGamePage({ gameId, fallbackGame, initialDetail = null, backLabel = "Back", onBack, onSaved, onRefreshLibrary, onNotify }) {
   const seededInitialDetail = Number(initialDetail?.id || 0) === Number(gameId) ? initialDetail : null;
   const [detail, setDetail] = useState(seededInitialDetail);
+  const [emulatorProfiles, setEmulatorProfiles] = useState([]);
   const [form, setForm] = useState(() => buildFormState(seededInitialDetail, fallbackGame));
   const formRef = useRef(buildFormState(seededInitialDetail, fallbackGame));
   const fallbackGameRef = useRef(fallbackGame);
@@ -32,6 +33,20 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
   const [playtimeEditLocked, setPlaytimeEditLocked] = useState(true);
   const [confirmState, setConfirmState] = useState(null);
   const hasConsumedInitialDetailRef = useRef(Boolean(seededInitialDetail));
+
+  useEffect(() => {
+    let cancelled = false;
+    invoke("get_emulator_profiles")
+      .then((data) => {
+        if (!cancelled && Array.isArray(data)) {
+          setEmulatorProfiles(data);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     fallbackGameRef.current = fallbackGame;
@@ -186,16 +201,28 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
     });
   }
 
-  async function handleBrowseExe() {
+  const isEmulator = String(detail?.game_type || fallbackGame?.game_type || form.gameType || "").toLowerCase() === "emulator";
+
+  async function handleBrowseExeOrRom() {
     setPickingExe(true);
 
     try {
-      const selectedPath = await invoke("pick_exe_path");
-      if (selectedPath) {
-        updateField("executablePath", selectedPath);
+      if (isEmulator) {
+        const selectedProfile = (emulatorProfiles || []).find((p) => p?.id === formRef.current.emulatorId);
+        const emuName = selectedProfile?.name || detail?.emulator_profile_name || "";
+        const selectedPath = await invoke("pick_rom_path", { emulatorName: emuName || null });
+        if (selectedPath) {
+          updateField("romPath", selectedPath);
+          updateField("executablePath", selectedPath);
+        }
+      } else {
+        const selectedPath = await invoke("pick_exe_path");
+        if (selectedPath) {
+          updateField("executablePath", selectedPath);
+        }
       }
     } catch (nextError) {
-      notifyEditorError("Unable to choose executable.", nextError);
+      notifyEditorError(isEmulator ? "Unable to choose ROM." : "Unable to choose executable.", nextError);
     } finally {
       setPickingExe(false);
     }
@@ -272,45 +299,83 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
 
     try {
       const currentForm = formRef.current;
-      const nextExecutablePath = currentForm.executablePath.trim();
-      const previousExecutablePath = String(detail?.executable_path || "").trim();
-      if (nextExecutablePath && nextExecutablePath !== previousExecutablePath) {
-        await invoke("update_game_executable", {
+      const isEmu = currentForm.gameType === "emulator";
+
+      if (isEmu) {
+        const nextRomPath = (currentForm.romPath || currentForm.executablePath).trim();
+        await invoke("update_game_metadata", {
           input: {
             gameId,
-            exePath: nextExecutablePath,
+            name: currentForm.name.trim(),
+            store: currentForm.store || "Emulator",
+            coverUrl: currentForm.coverUrl.trim() || null,
+            coverPositionX: currentForm.coverPositionX,
+            coverPositionY: currentForm.coverPositionY,
+            coverZoom: currentForm.coverZoom,
+            backdropUrl: currentForm.backdropUrl.trim() || null,
+            backdropPositionX: currentForm.backdropPositionX,
+            backdropPositionY: currentForm.backdropPositionY,
+            backdropZoom: currentForm.backdropZoom,
+            titleLogoUrl: currentForm.titleLogoUrl.trim() || null,
+            useTitleLogo: currentForm.useTitleLogo,
+            titleLogoPositionX: currentForm.titleLogoPositionX,
+            titleLogoPositionY: currentForm.titleLogoPositionY,
+            titleLogoZoom: currentForm.titleLogoZoom,
+            summary: currentForm.summary.trim() || null,
+            releaseYear: currentForm.releaseYear ? Number(currentForm.releaseYear) : null,
+            genres: currentForm.genres,
+            platforms: currentForm.platforms,
+            developers: splitList(currentForm.developersInput),
+            publishers: splitList(currentForm.publishersInput),
+            ageRatingLabel: currentForm.ageRatingLabel || null,
+            completionStatus: detail?.completion_status || fallbackGame?.completion_status || "Backlog",
+            gameType: "emulator",
+            romPath: nextRomPath || null,
+            emulatorId: currentForm.emulatorId ? Number(currentForm.emulatorId) : null,
+          },
+        });
+      } else {
+        const nextExecutablePath = currentForm.executablePath.trim();
+        const previousExecutablePath = String(detail?.executable_path || "").trim();
+        if (nextExecutablePath && nextExecutablePath !== previousExecutablePath) {
+          await invoke("update_game_executable", {
+            input: {
+              gameId,
+              exePath: nextExecutablePath,
+            },
+          });
+        }
+
+        await invoke("update_game_metadata", {
+          input: {
+            gameId,
+            name: currentForm.name.trim(),
+            store: currentForm.store || null,
+            coverUrl: currentForm.coverUrl.trim() || null,
+            coverPositionX: currentForm.coverPositionX,
+            coverPositionY: currentForm.coverPositionY,
+            coverZoom: currentForm.coverZoom,
+            backdropUrl: currentForm.backdropUrl.trim() || null,
+            backdropPositionX: currentForm.backdropPositionX,
+            backdropPositionY: currentForm.backdropPositionY,
+            backdropZoom: currentForm.backdropZoom,
+            titleLogoUrl: currentForm.titleLogoUrl.trim() || null,
+            useTitleLogo: currentForm.useTitleLogo,
+            titleLogoPositionX: currentForm.titleLogoPositionX,
+            titleLogoPositionY: currentForm.titleLogoPositionY,
+            titleLogoZoom: currentForm.titleLogoZoom,
+            summary: currentForm.summary.trim() || null,
+            releaseYear: currentForm.releaseYear ? Number(currentForm.releaseYear) : null,
+            genres: currentForm.genres,
+            platforms: currentForm.platforms,
+            developers: splitList(currentForm.developersInput),
+            publishers: splitList(currentForm.publishersInput),
+            ageRatingLabel: currentForm.ageRatingLabel || null,
+            completionStatus: detail?.completion_status || fallbackGame?.completion_status || "Backlog",
+            gameType: "pc",
           },
         });
       }
-
-      await invoke("update_game_metadata", {
-        input: {
-          gameId,
-          name: currentForm.name.trim(),
-          store: currentForm.store || null,
-          coverUrl: currentForm.coverUrl.trim() || null,
-          coverPositionX: currentForm.coverPositionX,
-          coverPositionY: currentForm.coverPositionY,
-          coverZoom: currentForm.coverZoom,
-          backdropUrl: currentForm.backdropUrl.trim() || null,
-          backdropPositionX: currentForm.backdropPositionX,
-          backdropPositionY: currentForm.backdropPositionY,
-          backdropZoom: currentForm.backdropZoom,
-          titleLogoUrl: currentForm.titleLogoUrl.trim() || null,
-          useTitleLogo: currentForm.useTitleLogo,
-          titleLogoPositionX: currentForm.titleLogoPositionX,
-          titleLogoPositionY: currentForm.titleLogoPositionY,
-          titleLogoZoom: currentForm.titleLogoZoom,
-          summary: currentForm.summary.trim() || null,
-          releaseYear: currentForm.releaseYear ? Number(currentForm.releaseYear) : null,
-          genres: currentForm.genres,
-          platforms: currentForm.platforms,
-          developers: splitList(currentForm.developersInput),
-          publishers: splitList(currentForm.publishersInput),
-          ageRatingLabel: currentForm.ageRatingLabel || null,
-          completionStatus: detail?.completion_status || fallbackGame?.completion_status || "Backlog",
-        },
-      });
 
       if (playtimeChanged) {
         await invoke("update_game_playtime", {
@@ -478,14 +543,38 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
               />
             </Field>
 
-            <Field label="Store" element="div">
-              <PopupSelect
-                value={form.store}
-                options={STORE_OPTIONS}
-                placeholder="Select store"
-                onChange={(value) => updateField("store", value)}
-              />
-            </Field>
+            {isEmulator ? (
+              <Field label="Emulator Profile" element="div" required>
+                <PopupSelect
+                  value={
+                    (emulatorProfiles || []).find((p) => p?.id === form.emulatorId)?.name || detail?.emulator_profile_name || ""
+                  }
+                  options={
+                    Array.isArray(emulatorProfiles)
+                      ? emulatorProfiles.map((p) => p?.name).filter(Boolean)
+                      : []
+                  }
+                  placeholder={
+                    (emulatorProfiles || []).length > 0
+                      ? "Select emulator profile"
+                      : "No emulator profiles configured"
+                  }
+                  onChange={(selectedName) => {
+                    const matchedProfile = (emulatorProfiles || []).find((p) => p?.name === selectedName);
+                    updateField("emulatorId", matchedProfile ? matchedProfile.id : null);
+                  }}
+                />
+              </Field>
+            ) : (
+              <Field label="Store" element="div">
+                <PopupSelect
+                  value={form.store}
+                  options={STORE_OPTIONS}
+                  placeholder="Select store"
+                  onChange={(value) => updateField("store", value)}
+                />
+              </Field>
+            )}
 
             <Field label="Release Year" element="div">
               <PopupSelect
@@ -505,17 +594,28 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
               />
             </Field>
 
-            <Field className="edit-game-field-wide" label="Executable Path">
+            <Field
+              className="edit-game-field-wide"
+              label={isEmulator ? "ROM Path" : "Executable Path"}
+              required={isEmulator}
+            >
               <div className="edit-game-input-with-action">
                 <input
-                  value={form.executablePath}
-                  onChange={(event) => updateField("executablePath", event.target.value)}
-                  placeholder="Choose a .exe file"
+                  value={isEmulator ? (form.romPath || form.executablePath) : form.executablePath}
+                  onChange={(event) => {
+                    if (isEmulator) {
+                      updateField("romPath", event.target.value);
+                      updateField("executablePath", event.target.value);
+                    } else {
+                      updateField("executablePath", event.target.value);
+                    }
+                  }}
+                  placeholder={isEmulator ? "Choose a ROM file (.iso, .bin, .chd, .cso, etc.)" : "Choose a .exe file"}
                 />
                 <button
                   type="button"
                   className="action-button action-button-browse"
-                  onClick={handleBrowseExe}
+                  onClick={handleBrowseExeOrRom}
                   disabled={pickingExe || saving}
                 >
                   <FolderIcon />
@@ -1138,14 +1238,18 @@ function createEmptyForm() {
 
 function buildFormState(detail, fallbackGame) {
   const source = detail || fallbackGame || {};
+  const isEmu = String(source.game_type || detail?.game_type || fallbackGame?.game_type || "").toLowerCase() === "emulator";
 
   return {
     name: String(source.name || ""),
-    store: String(source.store || ""),
+    store: String(source.store || (isEmu ? "Emulator" : "")),
     releaseYear: source.release_year ? String(source.release_year) : "",
     ageRatingLabel: String(detail?.age_rating?.label || ""),
     completionStatus: String(source.completion_status || "Backlog"),
-    executablePath: String(detail?.executable_path || ""),
+    gameType: isEmu ? "emulator" : "pc",
+    romPath: String(detail?.rom_path || source.rom_path || ""),
+    emulatorId: detail?.emulator_id ?? source.emulator_id ?? null,
+    executablePath: String(detail?.executable_path || detail?.rom_path || source.rom_path || ""),
     summary: String(detail?.summary || ""),
     coverUrl: String(source.cover_url || ""),
     backdropUrl: String(source.backdrop_url || ""),

@@ -62,26 +62,22 @@ impl EmulatorHandler for Pcsx2Handler {
     }
 
     fn prepare_launch_command(&self, cmd: &mut Command, rom_path: &str, user_args: &str) {
-        // PCSX2 does not accept `-batch` or `-nogui` via CLI in modern Qt versions
-        let sanitized_template = user_args
-            .replace("-nogui", "")
-            .replace("--nogui", "")
-            .replace("-batch", "")
-            .replace("--batch", "")
-            .trim()
-            .to_string();
+        let template = user_args.trim();
 
-        if sanitized_template.is_empty() {
+        if template.is_empty() {
+            cmd.arg("-batch");
+            cmd.arg("-nogui");
+            cmd.arg("-fullscreen");
             cmd.arg("--");
             cmd.arg(rom_path);
-        } else if sanitized_template.contains("{rom_path}") {
-            let replaced = sanitized_template.replace("{rom_path}", rom_path);
+        } else if template.contains("{rom_path}") {
+            let replaced = template.replace("{rom_path}", rom_path);
             let parsed_args = parse_cmd_arguments(&replaced);
             cmd.args(parsed_args);
         } else {
-            let parsed_args = parse_cmd_arguments(&sanitized_template);
+            let parsed_args = parse_cmd_arguments(template);
             cmd.args(&parsed_args);
-            if !sanitized_template.contains("--") {
+            if !parsed_args.iter().any(|a| a == "--") {
                 cmd.arg("--");
             }
             cmd.arg(rom_path);
