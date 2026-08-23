@@ -1,3 +1,5 @@
+pub mod emulators;
+
 use chrono::{Datelike, Local, NaiveDate, TimeZone, Timelike};
 use reqwest::{blocking::Client, header::RANGE};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -2216,6 +2218,7 @@ fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
     let _ = conn.execute("ALTER TABLE games ADD COLUMN emulator_id INTEGER", []);
     let _ = conn.execute("ALTER TABLE games ADD COLUMN emulator_exe_path TEXT", []);
     let _ = conn.execute("ALTER TABLE games ADD COLUMN launch_arguments TEXT", []);
+    let _ = conn.execute("ALTER TABLE games ADD COLUMN emulator_profile_name TEXT", []);
     let _ = conn.execute(
         "
     CREATE TABLE IF NOT EXISTS emulator_profiles (
@@ -2240,6 +2243,60 @@ fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
     );
     let _ = conn.execute(
         "UPDATE emulator_profiles SET default_args = TRIM(REPLACE(REPLACE(REPLACE(COALESCE(default_args, ''), '\"{rom_path}\"', ''), '{rom_path}', ''), '--', ''))",
+        [],
+    );
+    // Backfill emulator_profile_name for existing games with an emulator_id
+    let _ = conn.execute(
+        "UPDATE games
+         SET emulator_profile_name = (
+             SELECT ep.name FROM emulator_profiles ep WHERE ep.id = games.emulator_id
+         )
+         WHERE game_type = 'emulator'
+           AND emulator_id IS NOT NULL
+           AND (emulator_profile_name IS NULL OR emulator_profile_name = '')",
+        [],
+    );
+    // Backfill emulator_profile_name for PS2 games that were orphaned
+    let _ = conn.execute(
+        "UPDATE games
+         SET emulator_profile_name = 'PCSX2'
+         WHERE game_type = 'emulator'
+           AND (emulator_profile_name IS NULL OR emulator_profile_name = '')
+           AND (
+               LOWER(COALESCE(rom_path, '')) LIKE '%ps2%'
+               OR LOWER(COALESCE(rom_path, '')) LIKE '%mortal kombat%'
+               OR LOWER(COALESCE(name, '')) LIKE '%shaolin monks%'
+               OR LOWER(COALESCE(platforms_json, '')) LIKE '%playstation 2%'
+           )",
+        [],
+    );
+    // Backfill emulator_profile_name for PS1 games that were orphaned
+    let _ = conn.execute(
+        "UPDATE games
+         SET emulator_profile_name = 'DuckStation'
+         WHERE game_type = 'emulator'
+           AND (emulator_profile_name IS NULL OR emulator_profile_name = '')
+           AND (
+               LOWER(COALESCE(rom_path, '')) LIKE '%ps1%'
+               OR LOWER(COALESCE(platforms_json, '')) LIKE '%playstation%'
+           )",
+        [],
+    );
+    // Relink any orphaned games to active profiles with matching names
+    let _ = conn.execute(
+        "UPDATE games
+         SET emulator_id = (
+             SELECT ep.id FROM emulator_profiles ep
+             WHERE LOWER(ep.name) = LOWER(games.emulator_profile_name)
+             ORDER BY ep.id DESC LIMIT 1
+         )
+         WHERE game_type = 'emulator'
+           AND emulator_id IS NULL
+           AND emulator_profile_name IS NOT NULL
+           AND EXISTS (
+               SELECT 1 FROM emulator_profiles ep
+               WHERE LOWER(ep.name) = LOWER(games.emulator_profile_name)
+           )",
         [],
     );
     conn.execute(
@@ -3444,107 +3501,49 @@ fn scan_once(state: &AppState, app: Option<&AppHandle>) -> Result<bool, String> 
             let matched_emu = emu_games.iter().find(|emu| {
                 let emu_exe_lower = emu.emulator_exe_name.to_lowercase();
                 let exe_matches = (!emu.emulator_exe_path.is_empty() && process.exe_path == emu.emulator_exe_path)
-                    || (!emu.emulator_exe_name.is_empty() && process.exe_name == emu.emulator_exe_name)
-                    || (proc_exe_lower.contains("pcsx2") && (emu_exe_lower.contains("pcsx2") || emu_exe_lower.is_empty()))
-                    || (proc_exe_lower.contains("dolphin") && (emu_exe_lower.contains("dolphin") || emu_exe_lower.is_empty()))
-                    || (proc_exe_lower.contains("rpcs3") && (emu_exe_lower.contains("rpcs3") || emu_exe_lower.is_empty()))
-                    || (proc_exe_lower.contains("retroarch") && (emu_exe_lower.contains("retroarch") || emu_exe_lower.is_empty()))
-                    || (proc_exe_lower.contains("duckstation") && (emu_exe_lower.contains("duckstation") || emu_exe_lower.is_empty()))
-                    || (proc_exe_lower.contains("ppsspp") && (emu_exe_lower.contains("ppsspp") || emu_exe_lower.is_empty()))
-                    || (proc_exe_lower.contains("ryujinx") && (emu_exe_lower.contains("ryujinx") || emu_exe_lower.is_empty()))
-                    || (proc_exe_lower.contains("cemu") && (emu_exe_lower.contains("cemu") || emu_exe_lower.is_empty()))
-                    || (proc_exe_lower.contains("citra") && (emu_exe_lower.contains("citra") || emu_exe_lower.is_empty()))
-                    || (proc_exe_lower.contains("mgba") && (emu_exe_lower.contains("mgba") || emu_exe_lower.is_empty()))
-                    || (proc_exe_lower.contains("melonds") && (emu_exe_lower.contains("melonds") || emu_exe_lower.is_empty()))
-                    || (proc_exe_lower.contains("xenia") && (emu_exe_lower.contains("xenia") || emu_exe_lower.is_empty()));
-                if !exe_matches {
+                    || (!emu.emulator_exe_name.is_empty() && process.exe_name == emu.emulator_exe_name);
+
+                let handler = emulators::find_handler(&proc_exe_lower)
+                    .or_else(|| emulators::find_handler(&emu_exe_lower));
+
+                let is_match = exe_matches || handler.map(|h| h.matches(&proc_exe_lower, &emu_exe_lower)).unwrap_or(false);
+                if !is_match {
                     return false;
                 }
 
-                let is_window_idle_launcher = |title: &str| -> bool {
-                    let t = title.trim().to_lowercase();
-                    t == "pcsx2"
-                        || t.starts_with("pcsx2 v")
-                        || t.starts_with("pcsx2 -")
-                        || t.starts_with("pcsx2 ")
-                        || t == "dolphin"
-                        || t.starts_with("dolphin ")
-                        || t == "rpcs3"
-                        || t.starts_with("rpcs3 ")
-                        || t == "retroarch"
-                        || t == "duckstation"
-                        || t.starts_with("duckstation ")
+                let proc_info = emulators::ProcessInfo {
+                    exe_name: &process.exe_name,
+                    exe_path: &process.exe_path,
+                    cmd_args: &process.cmd_args,
+                    window_titles: &process.window_titles,
                 };
 
-                let norm_game_name = normalize_game_title_for_window_match(&emu.game_name);
-                let rom_stem = Path::new(&emu.rom_path)
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("");
-                let norm_rom_stem = normalize_game_title_for_window_match(rom_stem);
+                let emu_info = emulators::EmuGameInfo {
+                    game_name: &emu.game_name,
+                    rom_path: &emu.rom_path,
+                    rom_file_name: &emu.rom_file_name,
+                    emulator_exe_name: &emu.emulator_exe_name,
+                    emulator_exe_path: &emu.emulator_exe_path,
+                };
 
-                // Method 2: Check window titles for game name (e.g. "Mortal Kombat - Shaolin Monks" or "PCSX2 v2.x | Mortal Kombat...")
-                let title_matches = process.window_titles.iter().any(|title| {
-                    let norm_title = normalize_game_title_for_window_match(title);
-                    let has_game_name = (!norm_game_name.is_empty() && norm_title.contains(&norm_game_name))
-                        || (!norm_rom_stem.is_empty() && norm_title.contains(&norm_rom_stem));
-                    if has_game_name {
-                        return true;
-                    }
-                    false
-                });
-
-                if title_matches {
-                    return true;
+                if let Some(h) = handler {
+                    return h.is_game_active(&proc_info, &emu_info);
                 }
 
-                // Check if the emulator is currently in an active game rendering state (e.g. Speed / FPS / GSdx in title)
-                let is_rendering_gameplay = process.window_titles.iter().any(|title| {
-                    let t_lower = title.to_lowercase();
-                    if is_window_idle_launcher(title) {
-                        return false;
-                    }
-                    t_lower.contains("speed:")
-                        || t_lower.contains("fps:")
-                        || t_lower.contains("vps:")
-                        || t_lower.contains("gsdx")
-                        || t_lower.contains("slot:")
-                });
-
-                // If window titles indicate emulator is in the idle launcher menu and not rendering a game:
-                let is_only_idle_menu = !process.window_titles.is_empty()
-                    && process.window_titles.iter().all(|title| is_window_idle_launcher(title));
-
-                if is_only_idle_menu {
-                    return false;
-                }
-
-                // Method 1: Check command line arguments (only if not in idle launcher menu)
+                // Generic fallback for custom unlisted emulators
                 let cmd_matches = process.cmd_args.iter().any(|arg| {
                     let norm_arg = normalize_exe_path(arg);
                     norm_arg.contains(&emu.rom_path)
                         || (!emu.rom_file_name.is_empty() && norm_arg.contains(&emu.rom_file_name))
                 });
+                let is_only_idle_menu = !process.window_titles.is_empty()
+                    && process.window_titles.iter().all(|title| emulators::is_any_idle_window(title));
 
-                if cmd_matches && (is_rendering_gameplay || !is_only_idle_menu) {
-                    return true;
+                if is_only_idle_menu {
+                    return false;
                 }
 
-                // Method 3: If this is the only game configured for this emulator and the render window shows active speed/fps
-                let same_emu_count = emu_games
-                    .iter()
-                    .filter(|g| {
-                        let g_emu_lower = g.emulator_exe_name.to_lowercase();
-                        g.emulator_exe_path == emu.emulator_exe_path
-                            || (!g_emu_lower.is_empty() && proc_exe_lower.contains(&g_emu_lower))
-                    })
-                    .count();
-
-                if same_emu_count == 1 && is_rendering_gameplay {
-                    return true;
-                }
-
-                false
+                cmd_matches
             });
 
             let (executable_id, game_id, game_name, exe_name, exe_path) = if let Some(emu) = matched_emu {
@@ -5447,9 +5446,15 @@ fn add_game(
     let norm_emu_exe = emulator_exe_path.map(|p| normalize_exe_path(&p));
     let norm_rom_path = rom_path.map(|p| normalize_exe_path(&p)).or_else(|| is_emulator.then_some(final_exe_path.clone()));
 
+    let emu_profile_name: Option<String> = if let Some(emu_id) = emulator_id {
+        conn.query_row("SELECT name FROM emulator_profiles WHERE id = ?1", params![emu_id], |r| r.get(0)).optional().unwrap_or(None)
+    } else {
+        None
+    };
+
     conn.execute(
-        "INSERT INTO games (name, store, cover_url, backdrop_url, igdb_id, game_type, rom_path, emulator_id, emulator_exe_path, launch_arguments, created_at, updated_at)
-         VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+        "INSERT INTO games (name, store, cover_url, backdrop_url, igdb_id, game_type, rom_path, emulator_id, emulator_profile_name, emulator_exe_path, launch_arguments, created_at, updated_at)
+         VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
         params![
             game_name,
             store,
@@ -5458,6 +5463,7 @@ fn add_game(
             game_type_str,
             norm_rom_path,
             emulator_id,
+            emu_profile_name,
             norm_emu_exe,
             launch_arguments,
             now
@@ -5756,48 +5762,9 @@ fn pick_exe_path() -> Option<String> {
 
 #[tauri::command]
 fn pick_rom_path(emulator_name: Option<String>) -> Option<String> {
-    let emu_name = emulator_name.unwrap_or_default().trim().to_lowercase();
-    let is_pcsx2 = emu_name.contains("pcsx2")
-        || emu_name.contains("ps2")
-        || emu_name.contains("playstation 2");
-
-    let mut dialog = rfd::FileDialog::new();
-
-    if is_pcsx2 {
-        dialog = dialog
-            .add_filter(
-                "All File Types",
-                &[
-                    "bin", "iso", "cue", "mdf", "chd", "cso", "zso", "gz", "elf", "irx", "gs",
-                    "dump",
-                ],
-            )
-            .add_filter("Single-Track Raw Images", &["bin", "iso"])
-            .add_filter("Cue Sheets", &["cue"])
-            .add_filter("Media Descriptor File", &["mdf"])
-            .add_filter("MAME CHD Images", &["chd"])
-            .add_filter("CSO Images", &["cso"])
-            .add_filter("ZSO Images", &["zso"])
-            .add_filter("GZ Images", &["gz"])
-            .add_filter("ELF Executables", &["elf"])
-            .add_filter("IRX Executables", &["irx"])
-            .add_filter("GS Dumps", &["gs", "xz", "zst"])
-            .add_filter("Block Dumps", &["dump"])
-            .add_filter("All Files", &["*"]);
-    } else {
-        dialog = dialog
-            .add_filter(
-                "Game ROM / Disc Image",
-                &[
-                    "iso", "chd", "bin", "cue", "cso", "zso", "gz", "mdf", "nrg", "img", "dump",
-                    "nsp", "xci", "sfc", "smc", "nes", "gba", "gbc", "gb", "nds", "3ds", "rvz",
-                    "wbfs", "gcm", "z64", "n64", "ps3", "pkg", "zip", "7z", "rar", "elf", "pbp",
-                    "wad", "wux", "wud", "m3u",
-                ],
-            )
-            .add_filter("All Files", &["*"]);
-    }
-
+    let emu_name = emulator_name.unwrap_or_default();
+    let dialog = rfd::FileDialog::new();
+    let dialog = emulators::configure_dialog_for_emulator(&emu_name, dialog);
     dialog
         .pick_file()
         .map(|path| path.to_string_lossy().to_string())
@@ -5846,59 +5813,49 @@ fn save_emulator_profile(
     }
     let now = now_ts();
 
-    if let Some(id) = input.id {
+    let id = if let Some(id) = input.id {
         conn.execute(
             "UPDATE emulator_profiles SET name = ?1, exe_path = ?2, default_args = ?3, platform = ?4, updated_at = ?5 WHERE id = ?6",
             params![name, exe_path, input.default_args, input.platform, now, id],
         )
         .map_err(|err| err.to_string())?;
-
-        // Link any orphan emulator games to this profile if not linked
-        conn.execute(
-            "UPDATE games SET emulator_id = ?1 WHERE game_type = 'emulator' AND emulator_id IS NULL",
-            params![id],
-        )
-        .ok();
-
-        Ok(EmulatorProfile {
-            id,
-            name: name.to_string(),
-            exe_path,
-            default_args: input.default_args,
-            platform: input.platform,
-            created_at: now,
-            updated_at: now,
-        })
+        id
     } else {
         conn.execute(
             "INSERT INTO emulator_profiles (name, exe_path, default_args, platform, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
             params![name, exe_path, input.default_args, input.platform, now],
         )
         .map_err(|err| err.to_string())?;
-        let id = conn.last_insert_rowid();
+        conn.last_insert_rowid()
+    };
 
-        // Link any orphan emulator games to this profile if not linked
-        conn.execute(
-            "UPDATE games SET emulator_id = ?1 WHERE game_type = 'emulator' AND emulator_id IS NULL",
-            params![id],
-        )
-        .ok();
+    // Auto-relink all games that have matching emulator_profile_name or were previously linked
+    let _ = conn.execute(
+        "UPDATE games
+         SET emulator_id = ?1, emulator_profile_name = ?2
+         WHERE game_type = 'emulator'
+           AND (
+               LOWER(COALESCE(emulator_profile_name, '')) = LOWER(?2)
+               OR emulator_id = ?1
+           )",
+        params![id, name],
+    );
 
-        Ok(EmulatorProfile {
-            id,
-            name: name.to_string(),
-            exe_path,
-            default_args: input.default_args,
-            platform: input.platform,
-            created_at: now,
-            updated_at: now,
-        })
-    }
+    Ok(EmulatorProfile {
+        id,
+        name: name.to_string(),
+        exe_path,
+        default_args: input.default_args,
+        platform: input.platform,
+        created_at: now,
+        updated_at: now,
+    })
 }
 
 #[tauri::command]
 fn delete_emulator_profile(state: tauri::State<AppState>, id: i64) -> Result<(), String> {
     let conn = state.db.lock().map_err(|_| "database lock poisoned")?;
+    let _ = conn.execute("UPDATE games SET emulator_id = NULL WHERE emulator_id = ?1", params![id]);
     conn.execute("DELETE FROM emulator_profiles WHERE id = ?1", params![id])
         .map_err(|err| err.to_string())?;
     Ok(())
@@ -6202,8 +6159,9 @@ fn update_game_metadata(
         game_type = COALESCE(?26, game_type),
         rom_path = COALESCE(?27, rom_path),
         emulator_id = COALESCE(?28, emulator_id),
-        emulator_exe_path = COALESCE(?29, emulator_exe_path),
-        launch_arguments = COALESCE(?30, launch_arguments),
+        emulator_profile_name = COALESCE(?29, emulator_profile_name),
+        emulator_exe_path = COALESCE(?30, emulator_exe_path),
+        launch_arguments = COALESCE(?31, launch_arguments),
         metadata_locked = 1,
         updated_at = ?24
       WHERE id = ?1
@@ -6241,6 +6199,9 @@ fn update_game_metadata(
                 input.game_type,
                 input.rom_path.map(|p| normalize_exe_path(&p)),
                 input.emulator_id,
+                input.emulator_id.and_then(|emu_id| {
+                    conn.query_row("SELECT name FROM emulator_profiles WHERE id = ?1", params![emu_id], |r| r.get::<_, String>(0)).optional().unwrap_or(None)
+                }),
                 input.emulator_exe_path.map(|p| normalize_exe_path(&p)),
                 input.launch_arguments,
             ],
@@ -8139,46 +8100,33 @@ fn launch_game(state: tauri::State<AppState>, game_id: i64) -> Result<(), String
         drop(conn);
 
         if emu_path.is_empty() || !Path::new(&emu_path).is_file() {
-            return Err(format!("Emulator executable not found on disk: {emu_path}"));
+            return Err("Emulator executable is not configured or not found on disk. Please configure the emulator profile in Settings.".to_string());
         }
         if rom.is_empty() || !Path::new(&rom).is_file() {
             return Err(format!("Game ROM file not found on disk: {rom}"));
         }
 
         let mut cmd = Command::new(&emu_path);
-        let emu_lower = emu_path.to_lowercase();
-        let is_pcsx2 = emu_lower.contains("pcsx2");
+        let emu_exe_name = Path::new(&emu_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        let handler = emulators::find_handler(emu_exe_name);
+        let user_args = launch_arguments.unwrap_or_default();
 
-        let args_template = launch_arguments.unwrap_or_default().trim().to_string();
-        let sanitized_template = if is_pcsx2 {
-            // PCSX2 does not accept `-batch` or `-nogui` via CLI in modern versions
-            args_template
-                .replace("-nogui", "")
-                .replace("--nogui", "")
-                .replace("-batch", "")
-                .replace("--batch", "")
-                .trim()
-                .to_string()
+        if let Some(h) = handler {
+            h.prepare_launch_command(&mut cmd, &rom, &user_args);
         } else {
-            args_template
-        };
-
-        if sanitized_template.is_empty() {
-            if is_pcsx2 {
-                cmd.arg("--");
+            let sanitized = user_args.trim();
+            if sanitized.is_empty() {
+                cmd.arg(&rom);
+            } else if sanitized.contains("{rom_path}") {
+                let replaced = sanitized.replace("{rom_path}", &rom);
+                cmd.args(emulators::parse_cmd_arguments(&replaced));
+            } else {
+                cmd.args(emulators::parse_cmd_arguments(sanitized));
+                cmd.arg(&rom);
             }
-            cmd.arg(&rom);
-        } else if sanitized_template.contains("{rom_path}") {
-            let replaced = sanitized_template.replace("{rom_path}", &rom);
-            let parsed_args = parse_cmd_arguments(&replaced);
-            cmd.args(parsed_args);
-        } else {
-            let parsed_args = parse_cmd_arguments(&sanitized_template);
-            cmd.args(parsed_args);
-            if is_pcsx2 && !sanitized_template.contains("--") {
-                cmd.arg("--");
-            }
-            cmd.arg(&rom);
         }
 
         match cmd.spawn() {

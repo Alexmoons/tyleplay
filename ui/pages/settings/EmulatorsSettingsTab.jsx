@@ -22,8 +22,20 @@ const EMULATOR_PRESETS = [
   {
     name: "PCSX2",
     platform: "PlayStation 2",
-    defaultArgs: "",
+    defaultArgs: "-fullscreen -nogui",
     hint: "Sony PlayStation 2",
+  },
+  {
+    name: "DuckStation",
+    platform: "PlayStation 1",
+    defaultArgs: "-batch -fullscreen",
+    hint: "Sony PlayStation 1",
+  },
+  {
+    name: "ePSXe",
+    platform: "PlayStation 1",
+    defaultArgs: "-nogui -loadbin",
+    hint: "Sony PlayStation 1",
   },
 ];
 
@@ -369,28 +381,20 @@ export default function EmulatorsSettingsTab({ onNotify }) {
             </div>
 
             <form onSubmit={handleSave} style={{ display: "grid", gap: "1rem", marginTop: "0.5rem" }}>
-              <label className="edit-game-field">
-                <span className="edit-game-field-label">Emulator Name *</span>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. PCSX2"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  autoComplete="off"
-                />
-              </label>
-
-              <label className="edit-game-field">
-                <span className="edit-game-field-label">Platform / System</span>
-                <input
-                  type="text"
-                  placeholder="e.g. PlayStation 2"
-                  value={formData.platform}
-                  onChange={(e) => setFormData({ ...formData, platform: e.target.value })}
-                  autoComplete="off"
-                />
-              </label>
+              <div className="space-y-2 text-sm text-gray-300" style={{ padding: "0.25rem 0" }}>
+                <div className="flex items-center gap-3">
+                  <span className="text-gray-400 font-medium" style={{ minWidth: "80px" }}>
+                    Emulator:
+                  </span>
+                  <span className="text-white font-semibold">{formData.name || "Custom"}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-gray-400 font-medium" style={{ minWidth: "80px" }}>
+                    Platform:
+                  </span>
+                  <span className="text-white font-semibold">{formData.platform || "Universal"}</span>
+                </div>
+              </div>
 
               <label className="edit-game-field">
                 <span className="edit-game-field-label">Executable Path (.exe) *</span>
@@ -398,7 +402,7 @@ export default function EmulatorsSettingsTab({ onNotify }) {
                   <input
                     type="text"
                     required
-                    placeholder="e.g. D:\Emulators\PCSX2\pcsx2-qt.exe"
+                    placeholder={`e.g. D:\\Emulators\\${formData.name || "Emulator"}\\...`}
                     value={formData.exePath}
                     onChange={(e) => setFormData({ ...formData, exePath: e.target.value })}
                     autoComplete="off"

@@ -528,6 +528,24 @@ const mockEmulatorProfiles = [
     platform: "Sony PlayStation 3",
     created_at: mockNow - 86400 * 8,
     updated_at: mockNow - 86400 * 8,
+  },
+  {
+    id: 3,
+    name: "ePSXe (PlayStation 1)",
+    exe_path: "C:\\Emulators\\ePSXe\\ePSXe.exe",
+    default_args: "-nogui -loadbin \"{rom_path}\"",
+    platform: "Sony PlayStation 1",
+    created_at: mockNow - 86400 * 5,
+    updated_at: mockNow - 86400 * 5,
+  },
+  {
+    id: 4,
+    name: "DuckStation (PlayStation 1)",
+    exe_path: "C:\\Emulators\\DuckStation\\duckstation-qt-x64-ReleaseLTCG.exe",
+    default_args: "-batch -fullscreen \"{rom_path}\"",
+    platform: "Sony PlayStation 1",
+    created_at: mockNow - 86400 * 3,
+    updated_at: mockNow - 86400 * 3,
   }
 ];
 
