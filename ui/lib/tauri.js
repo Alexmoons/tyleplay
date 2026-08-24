@@ -555,6 +555,15 @@ const mockEmulatorProfiles = [
     platform: "Sony PlayStation Portable",
     created_at: mockNow - 86400 * 2,
     updated_at: mockNow - 86400 * 2,
+  },
+  {
+    id: 6,
+    name: "RPCS3 (PlayStation 3)",
+    exe_path: "C:\\Emulators\\RPCS3\\rpcs3.exe",
+    default_args: "--no-gui",
+    platform: "Sony PlayStation 3",
+    created_at: mockNow - 86400 * 1,
+    updated_at: mockNow - 86400 * 1,
   }
 ];
 
@@ -1529,6 +1538,24 @@ export async function invoke(command, args) {
 
   if (command === "pick_rom_path") {
     return "C:\\Games\\Emulation\\ROMs\\Final Fantasy X.iso";
+  }
+
+  if (command === "pick_folder_path") {
+    return "C:\\Games\\Emulation\\PS3\\Demon's Souls";
+  }
+
+  if (command === "check_ps3_rom_status") {
+    const path = String(args?.path || "").toLowerCase();
+    if (!path.trim()) {
+      return { is_valid: false, status: "empty", message: "", detected_file: null };
+    }
+    if (path.endsWith(".iso")) {
+      return { is_valid: true, status: "iso_found", message: "PS3 ISO image selected (Make sure the ISO is decrypted)", detected_file: "game.iso" };
+    }
+    if (path.includes("eboot") || path.includes("demon") || path.includes("asura") || path.includes("ps3")) {
+      return { is_valid: true, status: "eboot_found", message: "EBOOT.BIN detected (PS3_GAME/USRDIR/EBOOT.BIN)", detected_file: "EBOOT.BIN" };
+    }
+    return { is_valid: false, status: "no_boot_file", message: "No EBOOT.BIN or bootable file found in folder", detected_file: null };
   }
 
   throw new Error(`Unsupported mock command: ${command}`);

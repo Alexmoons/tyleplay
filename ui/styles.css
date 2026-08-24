@@ -5215,6 +5215,83 @@ img {
   gap: 0.7rem;
 }
 
+.edit-game-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.browse-dropdown-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.browse-dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.browse-dropdown-chevron {
+  width: 14px;
+  height: 14px;
+  margin-left: 0.15rem;
+  transition: transform 200ms ease;
+}
+
+.browse-dropdown-trigger.is-open .browse-dropdown-chevron {
+  transform: rotate(180deg);
+}
+
+.browse-dropdown-panel {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 50;
+  min-width: 270px;
+  padding: 0.35rem;
+  border-radius: 14px;
+  background: #161616;
+  border: 0;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.browse-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.6rem 0.85rem;
+  border-radius: 9px;
+  background: transparent;
+  border: 0;
+  color: #ffffff;
+  font-size: 0.84rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+  white-space: nowrap;
+}
+
+.browse-dropdown-item:hover {
+  background: #1f1f1f;
+  color: #ffffff;
+}
+
+.browse-dropdown-item svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: #a1a1aa;
+}
+
+.browse-dropdown-item:hover svg {
+  color: #ffffff;
+}
+
 .edit-game-input-with-action.is-locked input {
   color: #9aa5bc;
 }
@@ -5223,6 +5300,29 @@ img {
   color: #98a3bb;
   font-size: 0.82rem;
   line-height: 1.45;
+}
+
+.ps3-rom-status-note {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+  margin-top: 0.45rem;
+  line-height: 1.4;
+}
+
+.ps3-rom-status-note svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.ps3-rom-status-note.is-valid {
+  color: #4ade80;
+}
+
+.ps3-rom-status-note.is-invalid {
+  color: #f87171;
 }
 
 .edit-game-inline-action {

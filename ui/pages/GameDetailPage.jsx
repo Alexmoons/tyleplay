@@ -523,7 +523,8 @@ export default function GameDetailPage({
   const lastPlayedTimestamp = Number(detail?.last_played || game?.finished_last_played || game?.last_played || 0);
   const lastPlayedLabel = lastPlayedTimestamp ? formatDateLabel(lastPlayedTimestamp) : "Not played yet";
   const lastPlayedRelative = lastPlayedTimestamp ? formatRelativePlayed(lastPlayedTimestamp) : "No sessions recorded";
-  const executablePath = String(detail?.executable_path || detail?.executable_name || "").trim() || "-";
+  const isEmulator = String(detail?.game_type || game?.game_type || "").toLowerCase() === "emulator";
+  const executablePath = String(detail?.executable_path || detail?.rom_path || game?.rom_path || detail?.executable_name || "").trim() || "-";
   const backdropStyle = game?.backdrop_url || game?.cover_url
     ? buildBackdropPresentationStyle(
       game.backdrop_url || game.cover_url,
@@ -534,7 +535,7 @@ export default function GameDetailPage({
     : undefined;
   const releaseYear = detail?.release_year || game?.release_year || "-";
   const storeLabel = formatGameStoreLabel(detail?.store ?? game?.store);
-  const hasExecutable = Boolean(detail?.executable_path);
+  const hasExecutable = Boolean(detail?.executable_path || detail?.rom_path || game?.rom_path);
   const isFavorite = Boolean(game?.isFavorite ?? game?.is_favorite);
   const hasManualPlaytime = Boolean(detail?.has_manual_playtime);
   const addedAtLabel = Number(game?.created_at || 0) > 0 ? formatAddedDateLabel(game.created_at) : "";
@@ -888,7 +889,7 @@ export default function GameDetailPage({
               <DetailRow icon={<UsersIcon className="text-teal-400" />} label="Developer" value={developers.length ? developers : "-"} />
               <DetailRow icon={<UsersIcon className="text-cyan-400" />} label="Publisher" value={publishers.length ? publishers : "-"} />
               <DetailRow icon={<ShieldIcon className="text-rose-400" />} label="Age Rating" value={detail?.age_rating?.label || "-"} imageValue={ageRatingImage} />
-              <DetailRow icon={<FolderIcon className="text-amber-500" />} label="Game EXE" value={executablePath} isPath />
+              <DetailRow icon={<FolderIcon className="text-amber-500" />} label={isEmulator ? "Game ROM" : "Game EXE"} value={executablePath} isPath />
             </div>
           </div>
         </div>

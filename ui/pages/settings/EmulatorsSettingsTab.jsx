@@ -43,6 +43,12 @@ const EMULATOR_PRESETS = [
     defaultArgs: "--fullscreen --pause-menu-exit",
     hint: "Sony PlayStation Portable (PSP)",
   },
+  {
+    name: "RPCS3",
+    platform: "PlayStation 3",
+    defaultArgs: "--no-gui",
+    hint: "Sony PlayStation 3",
+  },
 ];
 
 export default function EmulatorsSettingsTab({ onNotify }) {

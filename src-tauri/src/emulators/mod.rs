@@ -2,6 +2,7 @@ pub mod duckstation;
 pub mod epsxe;
 pub mod pcsx2;
 pub mod ppsspp;
+pub mod rpcs3;
 
 use std::process::Command;
 
@@ -21,7 +22,7 @@ pub struct EmuGameInfo<'a> {
 }
 
 pub trait EmulatorHandler: Send + Sync {
-    /// Identifier name of the emulator (e.g. "PCSX2", "DuckStation", "ePSXe", "PPSSPP")
+    /// Identifier name of the emulator (e.g. "PCSX2", "DuckStation", "ePSXe", "PPSSPP", "RPCS3")
     fn name(&self) -> &'static str;
 
     /// Checks if a running process executable or emulator profile matches this handler
@@ -46,6 +47,7 @@ pub fn get_all_handlers() -> &'static [&'static dyn EmulatorHandler] {
         &duckstation::DuckstationHandler,
         &epsxe::EpsxeHandler,
         &ppsspp::PpssppHandler,
+        &rpcs3::Rpcs3Handler,
     ]
 }
 

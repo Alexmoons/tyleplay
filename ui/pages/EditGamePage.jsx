@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftIcon, ChevronDownIcon, FolderIcon, InfoCircleIcon, LockIcon, PencilIcon, RefreshIcon } from "../components/icons";
+import { ArrowLeftIcon, CheckCircleIcon, ChevronDownIcon, FolderIcon, InfoCircleIcon, LockIcon, PencilIcon, RefreshIcon, WarningTriangleIcon } from "../components/icons";
 import LoadingIndicator from "../components/LoadingIndicator";
 import { IGDB_GENRE_OPTIONS, IGDB_PLATFORM_OPTIONS } from "../lib/game-option-lists";
 import { buildLogoPresentationStyle, getInitials, resolveBackdropMedia, resolveGenericMedia, resolvePosterMedia, resolveSteamLogoMedia } from "../lib/game-helpers";
@@ -19,6 +19,7 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
   const seededInitialDetail = Number(initialDetail?.id || 0) === Number(gameId) ? initialDetail : null;
   const [detail, setDetail] = useState(seededInitialDetail);
   const [emulatorProfiles, setEmulatorProfiles] = useState([]);
+  const [ps3RomStatus, setPs3RomStatus] = useState(null);
   const [form, setForm] = useState(() => buildFormState(seededInitialDetail, fallbackGame));
   const formRef = useRef(buildFormState(seededInitialDetail, fallbackGame));
   const fallbackGameRef = useRef(fallbackGame);
@@ -33,6 +34,7 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
   const [playtimeEditLocked, setPlaytimeEditLocked] = useState(true);
   const [confirmState, setConfirmState] = useState(null);
   const hasConsumedInitialDetailRef = useRef(Boolean(seededInitialDetail));
+  const isEmulator = String(detail?.game_type || fallbackGame?.game_type || form?.gameType || "").toLowerCase() === "emulator";
 
   useEffect(() => {
     let cancelled = false;
@@ -47,6 +49,39 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const selectedProfile = (emulatorProfiles || []).find((p) => p?.id === form.emulatorId);
+    const isRpcs3 = isEmulator && Boolean(
+      selectedProfile?.name?.toLowerCase().includes("rpcs3") ||
+      selectedProfile?.platform?.toLowerCase().includes("playstation 3") ||
+      selectedProfile?.exe_path?.toLowerCase().includes("rpcs3") ||
+      selectedProfile?.exePath?.toLowerCase().includes("rpcs3") ||
+      detail?.emulator_profile_name?.toLowerCase().includes("rpcs3") ||
+      detail?.platform?.toLowerCase().includes("playstation 3")
+    );
+
+    const path = (form.romPath || form.executablePath || "").trim();
+    if (isRpcs3 && path) {
+      let isCurrent = true;
+      invoke("check_ps3_rom_status", { path })
+        .then((res) => {
+          if (isCurrent) {
+            setPs3RomStatus(res);
+          }
+        })
+        .catch(() => {
+          if (isCurrent) {
+            setPs3RomStatus(null);
+          }
+        });
+      return () => {
+        isCurrent = false;
+      };
+    } else {
+      setPs3RomStatus(null);
+    }
+  }, [isEmulator, form.emulatorId, form.romPath, form.executablePath, emulatorProfiles, detail]);
 
   useEffect(() => {
     fallbackGameRef.current = fallbackGame;
@@ -201,8 +236,6 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
     });
   }
 
-  const isEmulator = String(detail?.game_type || fallbackGame?.game_type || form.gameType || "").toLowerCase() === "emulator";
-
   async function handleBrowseExeOrRom() {
     setPickingExe(true);
 
@@ -223,6 +256,31 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
       }
     } catch (nextError) {
       notifyEditorError(isEmulator ? "Unable to choose ROM." : "Unable to choose executable.", nextError);
+    } finally {
+      setPickingExe(false);
+    }
+  }
+
+  async function handleBrowseRomFolder() {
+    setPickingExe(true);
+
+    try {
+      const selectedPath = await invoke("pick_folder_path");
+      if (selectedPath) {
+        let pathToUse = selectedPath;
+        try {
+          const statusResult = await invoke("check_ps3_rom_status", { path: selectedPath });
+          if (statusResult?.detected_file) {
+            pathToUse = statusResult.detected_file;
+          }
+        } catch {
+          // fallback to selected folder
+        }
+        updateField("romPath", pathToUse);
+        updateField("executablePath", pathToUse);
+      }
+    } catch (nextError) {
+      notifyEditorError("Unable to choose game folder.", nextError);
     } finally {
       setPickingExe(false);
     }
@@ -594,35 +652,70 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
               />
             </Field>
 
-            <Field
-              className="edit-game-field-wide"
-              label={isEmulator ? "ROM Path" : "Executable Path"}
-              required={isEmulator}
-            >
-              <div className="edit-game-input-with-action">
-                <input
-                  value={isEmulator ? (form.romPath || form.executablePath) : form.executablePath}
-                  onChange={(event) => {
-                    if (isEmulator) {
-                      updateField("romPath", event.target.value);
-                      updateField("executablePath", event.target.value);
-                    } else {
-                      updateField("executablePath", event.target.value);
-                    }
-                  }}
-                  placeholder={isEmulator ? "Choose a ROM file (.iso, .bin, .chd, .cso, etc.)" : "Choose a .exe file"}
-                />
-                <button
-                  type="button"
-                  className="action-button action-button-browse"
-                  onClick={handleBrowseExeOrRom}
-                  disabled={pickingExe || saving}
+            {(() => {
+              const selectedProfile = (emulatorProfiles || []).find((p) => p?.id === form.emulatorId);
+              const isRpcs3Profile = isEmulator && Boolean(
+                selectedProfile?.name?.toLowerCase().includes("rpcs3") ||
+                selectedProfile?.platform?.toLowerCase().includes("playstation 3") ||
+                selectedProfile?.exe_path?.toLowerCase().includes("rpcs3") ||
+                selectedProfile?.exePath?.toLowerCase().includes("rpcs3") ||
+                detail?.emulator_profile_name?.toLowerCase().includes("rpcs3") ||
+                detail?.platform?.toLowerCase().includes("playstation 3")
+              );
+
+              return (
+                <Field
+                  className="edit-game-field-wide"
+                  label={isEmulator ? (isRpcs3Profile ? "ROM File or Game Folder" : "ROM File") : "Executable Path"}
+                  required={isEmulator}
                 >
-                  <FolderIcon />
-                  <span>{pickingExe ? "Browsing..." : "Browse"}</span>
-                </button>
-              </div>
-            </Field>
+                  <div className="edit-game-input-with-action">
+                    <input
+                      value={isEmulator ? (form.romPath || form.executablePath) : form.executablePath}
+                      onChange={(event) => {
+                        if (isEmulator) {
+                          updateField("romPath", event.target.value);
+                          updateField("executablePath", event.target.value);
+                        } else {
+                          updateField("executablePath", event.target.value);
+                        }
+                      }}
+                      placeholder={
+                        isEmulator
+                          ? (isRpcs3Profile
+                              ? "Choose a decrypted ROM file (.iso) or game folder"
+                              : "Choose a ROM file (.iso, .bin, .chd, .cso, etc.)")
+                          : "Choose a .exe file"
+                      }
+                    />
+                    {isEmulator && isRpcs3Profile ? (
+                      <BrowseDropdown
+                        onPickFile={handleBrowseExeOrRom}
+                        onPickFolder={handleBrowseRomFolder}
+                        isPicking={pickingExe}
+                        disabled={saving}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="action-button action-button-browse"
+                        onClick={handleBrowseExeOrRom}
+                        disabled={pickingExe || saving}
+                      >
+                        <FolderIcon />
+                        <span>{pickingExe ? "Browsing..." : "Browse"}</span>
+                      </button>
+                    )}
+                  </div>
+                  {isEmulator && isRpcs3Profile && Boolean((form.romPath || form.executablePath || "").trim()) && ps3RomStatus && ps3RomStatus.status !== "empty" && (
+                    <div className={`ps3-rom-status-note ${ps3RomStatus.is_valid ? "is-valid" : "is-invalid"}`}>
+                      {ps3RomStatus.is_valid ? <CheckCircleIcon /> : <WarningTriangleIcon />}
+                      <span>{ps3RomStatus.message}</span>
+                    </div>
+                  )}
+                </Field>
+              );
+            })()}
 
             <Field className="edit-game-field-wide" label="Summary">
               <textarea
@@ -1158,6 +1251,66 @@ function PopupSelect({ value, options, placeholder, onChange }) {
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function BrowseDropdown({ onPickFile, onPickFolder, isPicking, disabled }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    function handlePointerDown(event) {
+      if (!rootRef.current?.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [isOpen]);
+
+  return (
+    <div ref={rootRef} className="browse-dropdown-wrapper">
+      <button
+        type="button"
+        className={`action-button action-button-browse browse-dropdown-trigger${isOpen ? " is-open" : ""}`}
+        onClick={() => setIsOpen((prev) => !prev)}
+        disabled={isPicking || disabled}
+      >
+        <FolderIcon />
+        <span>{isPicking ? "Browsing..." : "Browse"}</span>
+        <ChevronDownIcon className="browse-dropdown-chevron" />
+      </button>
+
+      {isOpen && (
+        <div className="browse-dropdown-panel">
+          <button
+            type="button"
+            className="browse-dropdown-item"
+            onClick={() => {
+              setIsOpen(false);
+              onPickFile();
+            }}
+          >
+            <FolderIcon />
+            <span>Choose Decrypted ROM File (.iso)</span>
+          </button>
+          <button
+            type="button"
+            className="browse-dropdown-item"
+            onClick={() => {
+              setIsOpen(false);
+              onPickFolder();
+            }}
+          >
+            <FolderIcon />
+            <span>Choose Game Folder</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

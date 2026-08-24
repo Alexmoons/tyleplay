@@ -2278,6 +2278,11 @@ fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
            )",
         [],
     );
+    // Clean up any emulator binaries or emulator games accidentally inserted into executables table
+    let _ = conn.execute(
+        "DELETE FROM executables WHERE LOWER(exe_name) IN ('rpcs3.exe', 'pcsx2.exe', 'pcsx2-qtx64.exe', 'duckstation-qt-x64-release-ltcg.exe', 'duckstation-nogui-x64-release-ltcg.exe', 'ppssppwindows64.exe', 'ppssppwindows.exe', 'epsxe.exe') OR game_id IN (SELECT id FROM games WHERE game_type = 'emulator')",
+        [],
+    );
     // Backfill emulator_profile_name for PSP games that were orphaned
     let _ = conn.execute(
         "UPDATE games
@@ -2287,6 +2292,21 @@ fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
            AND (
                LOWER(COALESCE(rom_path, '')) LIKE '%psp%'
                OR LOWER(COALESCE(platforms_json, '')) LIKE '%playstation portable%'
+           )",
+        [],
+    );
+    // Backfill emulator_profile_name for PS3 games that were orphaned
+    let _ = conn.execute(
+        "UPDATE games
+         SET emulator_profile_name = 'RPCS3'
+         WHERE game_type = 'emulator'
+           AND (emulator_profile_name IS NULL OR emulator_profile_name = '')
+           AND (
+               LOWER(COALESCE(rom_path, '')) LIKE '%ps3%'
+               OR LOWER(COALESCE(rom_path, '')) LIKE '%.pkg%'
+               OR LOWER(COALESCE(rom_path, '')) LIKE '%eboot.bin%'
+               OR LOWER(COALESCE(platforms_json, '')) LIKE '%playstation 3%'
+               OR LOWER(COALESCE(platforms_json, '')) LIKE '%ps3%'
            )",
         [],
     );
@@ -2630,7 +2650,7 @@ fn display_exe_path(path: &str) -> String {
     path.trim().trim_matches('"').replace('/', "\\")
 }
 
-fn restore_windows_path_case(path: &str) -> String {
+pub fn restore_windows_path_case(path: &str) -> String {
     let normalized = display_exe_path(path);
     let Some((drive, rest)) = normalized.split_once(':') else {
         return normalized;
@@ -3471,7 +3491,7 @@ fn scan_once(state: &AppState, app: Option<&AppHandle>) -> Result<bool, String> 
                  FROM games g
                  LEFT JOIN emulator_profiles ep ON ep.id = g.emulator_id
                  LEFT JOIN executables e ON e.game_id = g.id AND e.status = 'tracked'
-                 WHERE g.game_type = 'emulator' AND g.rom_path IS NOT NULL AND g.rom_path != '' AND ep.exe_path IS NOT NULL",
+                 WHERE g.game_type = 'emulator' AND g.rom_path IS NOT NULL AND g.rom_path != ''",
             )
             .map_err(|err| err.to_string())?;
 
@@ -3489,6 +3509,7 @@ fn scan_once(state: &AppState, app: Option<&AppHandle>) -> Result<bool, String> 
                     .and_then(|n| n.to_str())
                     .map(|n| n.to_ascii_lowercase())
                     .unwrap_or_default();
+                let executable_id: Option<i64> = row.get(4)?;
                 Ok(TrackedEmulatorInfo {
                     game_id: row.get(0)?,
                     game_name: row.get(1)?,
@@ -3496,7 +3517,7 @@ fn scan_once(state: &AppState, app: Option<&AppHandle>) -> Result<bool, String> 
                     emulator_exe_name: emu_name,
                     rom_path: normalize_exe_path(&rom_path),
                     rom_file_name: rom_file,
-                    executable_id: row.get(4)?,
+                    executable_id: executable_id.unwrap_or(0),
                 })
             })
             .map_err(|err| err.to_string())?
@@ -3554,9 +3575,20 @@ fn scan_once(state: &AppState, app: Option<&AppHandle>) -> Result<bool, String> 
                 cmd_matches
             });
 
+            let is_emulator_process = emulators::find_handler(&proc_exe_lower).is_some()
+                || emu_games.iter().any(|emu| {
+                    (!emu.emulator_exe_path.is_empty() && process.exe_path == emu.emulator_exe_path)
+                        || (!emu.emulator_exe_name.is_empty() && process.exe_name == emu.emulator_exe_name)
+                });
+
             let (executable_id, game_id, game_name, exe_name, exe_path) = if let Some(emu) = matched_emu {
                 (emu.executable_id, emu.game_id, emu.game_name.clone(), process.exe_name.clone(), emu.rom_path.clone())
             } else {
+                if is_emulator_process {
+                    // Do not fallback to lookup_executable for emulator binaries
+                    continue;
+                }
+
                 let Some((executable_id, game_id, game_name, status)) =
                     lookup_executable(&conn, &process.exe_name, &process.exe_path).map_err(|err| err.to_string())?
                 else {
@@ -3570,15 +3602,22 @@ fn scan_once(state: &AppState, app: Option<&AppHandle>) -> Result<bool, String> 
                 (executable_id, game_id, game_name, process.exe_name.clone(), process.exe_path.clone())
             };
 
-            if executable_id == 0 || game_id == 0 {
+            if game_id == 0 {
                 continue;
             }
 
-            live_tracked_ids.insert(executable_id);
-            if !tracker.active.contains_key(&executable_id) {
+            let tracker_key = if executable_id > 0 {
+                executable_id
+            } else {
+                -game_id
+            };
+
+            live_tracked_ids.insert(tracker_key);
+            if !tracker.active.contains_key(&tracker_key) {
+                let db_exec_id: Option<i64> = if executable_id > 0 { Some(executable_id) } else { None };
                 conn.execute(
                     "INSERT INTO sessions (game_id, executable_id, started_at) VALUES (?1, ?2, ?3)",
-                    params![game_id, executable_id, now],
+                    params![game_id, db_exec_id, now],
                 )
                 .map_err(|err| err.to_string())?;
 
@@ -3589,7 +3628,7 @@ fn scan_once(state: &AppState, app: Option<&AppHandle>) -> Result<bool, String> 
 
                 let session_id = conn.last_insert_rowid();
                 tracker.active.insert(
-                    executable_id,
+                    tracker_key,
                     ActiveSession {
                         session_id,
                         game_id,
@@ -4719,7 +4758,14 @@ fn query_games(
                 raw_exe_path.as_deref()
             };
             let exe_exists = raw_path
-                .map(|path| Path::new(path).is_file())
+                .map(|path| {
+                    let p = Path::new(path);
+                    if game_type == "emulator" {
+                        p.exists()
+                    } else {
+                        p.is_file()
+                    }
+                })
                 .unwrap_or(false);
             let executable_path = if exe_exists {
                 raw_path.map(|path| restore_windows_path_case(path))
@@ -5365,22 +5411,36 @@ fn add_game(
         return Err("game name is required".to_string());
     }
 
+    let mut conn = state.db.lock().map_err(|_| "database lock poisoned")?;
+
     let (exe_name, final_exe_path, exe_path_display) = if is_emulator {
-        let actual_rom = rom_path.clone().unwrap_or_else(|| exe_path.clone());
-        let norm_rom = normalize_exe_path(&actual_rom);
+        let raw_rom = rom_path.clone().unwrap_or_else(|| exe_path.clone());
+        let resolved_rom = emulators::rpcs3::resolve_rpcs3_boot_target(&raw_rom);
+        let norm_rom = normalize_exe_path(&resolved_rom);
         if norm_rom.is_empty() {
             return Err("ROM path is required for emulator game".to_string());
         }
-        let emu_path = emulator_exe_path.as_deref().unwrap_or_default().trim();
+        let mut emu_path = emulator_exe_path.as_deref().unwrap_or_default().trim().to_string();
         if emu_path.is_empty() {
-            return Err("Emulator executable is required".to_string());
+            if let Some(emu_id) = emulator_id {
+                if let Ok(db_exe) = conn.query_row::<String, _, _>(
+                    "SELECT exe_path FROM emulator_profiles WHERE id = ?1",
+                    params![emu_id],
+                    |r| r.get(0),
+                ) {
+                    emu_path = db_exe.trim().to_string();
+                }
+            }
+        }
+        if emu_path.is_empty() {
+            return Err("Emulator executable is required. Please check your emulator profile settings.".to_string());
         }
         let file_name = Path::new(&norm_rom)
             .file_name()
             .and_then(|v| v.to_str())
             .map(normalize_exe_name)
             .unwrap_or_else(|| "game.rom".to_string());
-        let display = display_exe_path(&actual_rom);
+        let display = display_exe_path(&resolved_rom);
         (file_name, norm_rom, display)
     } else {
         let exe_path_disp = display_exe_path(&exe_path);
@@ -5412,7 +5472,6 @@ fn add_game(
         let value = value.trim().to_string();
         (!value.is_empty()).then_some(value)
     });
-    let mut conn = state.db.lock().map_err(|_| "database lock poisoned")?;
     let archive_conn = state
         .archive_db
         .lock()
@@ -5773,6 +5832,18 @@ fn pick_rom_path(emulator_name: Option<String>) -> Option<String> {
     dialog
         .pick_file()
         .map(|path| path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn pick_folder_path() -> Option<String> {
+    rfd::FileDialog::new()
+        .pick_folder()
+        .map(|path| path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn check_ps3_rom_status(path: String) -> emulators::rpcs3::Ps3RomDetectionResult {
+    emulators::rpcs3::inspect_ps3_path(&path)
 }
 
 #[tauri::command]
@@ -7515,7 +7586,14 @@ fn query_local_game_detail(
           raw_executable_path.as_deref()
         };
         let exe_exists = raw_path
-          .map(|path| Path::new(path).is_file())
+          .map(|path| {
+            let p = Path::new(path);
+            if game_type == "emulator" {
+              p.exists()
+            } else {
+              p.is_file()
+            }
+          })
           .unwrap_or(false);
         let executable_path = if exe_exists {
           raw_path.map(|path| restore_windows_path_case(path))
@@ -8109,15 +8187,17 @@ fn launch_game(state: tauri::State<AppState>, game_id: i64) -> Result<(), String
     };
 
     if game_type == "emulator" {
-        let emu_path = emulator_exe_path.unwrap_or_default();
-        let rom = rom_path.unwrap_or_default();
+        let raw_emu = emulator_exe_path.unwrap_or_default();
+        let raw_rom = rom_path.unwrap_or_default();
+        let emu_path = restore_windows_path_case(&raw_emu);
+        let rom = restore_windows_path_case(&raw_rom);
         drop(conn);
 
         if emu_path.is_empty() || !Path::new(&emu_path).is_file() {
             return Err("Emulator executable is not configured or not found on disk. Please configure the emulator profile in Settings.".to_string());
         }
-        if rom.is_empty() || !Path::new(&rom).is_file() {
-            return Err(format!("Game ROM file not found on disk: {rom}"));
+        if rom.is_empty() || !Path::new(&rom).exists() {
+            return Err(format!("Game ROM file or folder not found on disk: {rom}"));
         }
 
         let mut cmd = Command::new(&emu_path);
@@ -9431,7 +9511,9 @@ pub fn run() {
             get_emulator_profiles,
             save_emulator_profile,
             delete_emulator_profile,
-            pick_rom_path
+            pick_rom_path,
+            pick_folder_path,
+            check_ps3_rom_status
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
