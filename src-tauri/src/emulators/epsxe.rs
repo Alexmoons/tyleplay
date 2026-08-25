@@ -71,6 +71,5 @@ impl EmulatorHandler for EpsxeHandler {
             .add_filter("Cue Sheets (.cue)", &["cue"])
             .add_filter("PSP / PS1 Eboot (.pbp)", &["pbp"])
             .add_filter("Media Descriptor (.mdf)", &["mdf"])
-            .add_filter("All Files", &["*"])
     }
 }

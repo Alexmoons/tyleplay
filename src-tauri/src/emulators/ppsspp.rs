@@ -121,7 +121,6 @@ impl EmulatorHandler for PpssppHandler {
             .add_filter("Compressed Images (.cso / .chd)", &["cso", "chd"])
             .add_filter("PSP Eboot (.pbp)", &["pbp"])
             .add_filter("Homebrew Executables (.elf / .prx)", &["elf", "prx"])
-            .add_filter("All Files", &["*"])
     }
 }
 

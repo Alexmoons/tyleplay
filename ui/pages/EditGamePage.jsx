@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeftIcon, CheckCircleIcon, ChevronDownIcon, FolderIcon, InfoCircleIcon, LockIcon, PencilIcon, RefreshIcon, WarningTriangleIcon } from "../components/icons";
 import LoadingIndicator from "../components/LoadingIndicator";
 import { IGDB_GENRE_OPTIONS, IGDB_PLATFORM_OPTIONS } from "../lib/game-option-lists";
-import { buildLogoPresentationStyle, getInitials, resolveBackdropMedia, resolveGenericMedia, resolvePosterMedia, resolveSteamLogoMedia } from "../lib/game-helpers";
+import { buildLogoPresentationStyle, getInitials, resolveBackdropMedia, resolveGenericMedia, resolvePosterMedia, resolveSteamLogoMedia, validateRomFormat } from "../lib/game-helpers";
 import { invoke } from "../lib/tauri";
 import StarRating from "../components/StarRating";
 
@@ -34,7 +34,9 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
   const [playtimeEditLocked, setPlaytimeEditLocked] = useState(true);
   const [confirmState, setConfirmState] = useState(null);
   const hasConsumedInitialDetailRef = useRef(Boolean(seededInitialDetail));
-  const isEmulator = String(detail?.game_type || fallbackGame?.game_type || form?.gameType || "").toLowerCase() === "emulator";
+  const isEmulator = String(detail?.game_type || fallbackGame?.game_type || form?.gameType || "").toLowerCase() === "emulator"
+    || String(detail?.store || fallbackGame?.store || form?.store || "").toLowerCase() === "emulator"
+    || Boolean(detail?.rom_path || fallbackGame?.rom_path || form?.romPath || detail?.emulator_id || detail?.emulator_profile_name || detail?.emulator_name);
 
   useEffect(() => {
     let cancelled = false;
@@ -357,10 +359,33 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
 
     try {
       const currentForm = formRef.current;
-      const isEmu = currentForm.gameType === "emulator";
+      const isEmu = isEmulator
+        || currentForm.gameType === "emulator"
+        || String(detail?.game_type || fallbackGame?.game_type || "").toLowerCase() === "emulator"
+        || String(currentForm.store || detail?.store || "").toLowerCase() === "emulator"
+        || Boolean(currentForm.romPath || detail?.rom_path || currentForm.emulatorId || detail?.emulator_id || detail?.emulator_profile_name || detail?.emulator_name);
 
       if (isEmu) {
-        const nextRomPath = (currentForm.romPath || currentForm.executablePath).trim();
+        const nextRomPath = (currentForm.romPath || currentForm.executablePath || "").trim();
+        let finalEmulatorId = currentForm.emulatorId ? Number(currentForm.emulatorId) : null;
+        let emuName = (emulatorProfiles || []).find((p) => p?.id === currentForm.emulatorId)?.name || detail?.emulator_name || detail?.emulator_profile_name || "";
+        if (!finalEmulatorId && Array.isArray(emulatorProfiles) && emulatorProfiles.length > 0) {
+          const profileName = detail?.emulator_name || detail?.emulator_profile_name || "";
+          if (profileName) {
+            const matched = emulatorProfiles.find((p) => p?.name?.toLowerCase() === profileName.toLowerCase());
+            if (matched) {
+              finalEmulatorId = matched.id;
+              emuName = matched.name;
+            }
+          }
+        }
+
+        const validationError = validateRomFormat(emuName, nextRomPath);
+        if (validationError) {
+          notifyEditorError(validationError);
+          return;
+        }
+
         await invoke("update_game_metadata", {
           input: {
             gameId,
@@ -389,7 +414,7 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
             completionStatus: detail?.completion_status || fallbackGame?.completion_status || "Backlog",
             gameType: "emulator",
             romPath: nextRomPath || null,
-            emulatorId: currentForm.emulatorId ? Number(currentForm.emulatorId) : null,
+            emulatorId: finalEmulatorId,
           },
         });
       } else {
@@ -501,13 +526,46 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
       return;
     }
 
-    const nextExecutablePath = String(currentForm.executablePath || "").trim();
-    if (nextExecutablePath) {
-      try {
-        await invoke("validate_executable_path", { exePath: nextExecutablePath });
-      } catch (nextError) {
-        notifyEditorError("Invalid executable path.", nextError, "warning");
+    const isEmu = isEmulator
+      || currentForm.gameType === "emulator"
+      || String(detail?.game_type || fallbackGame?.game_type || "").toLowerCase() === "emulator"
+      || String(currentForm.store || detail?.store || "").toLowerCase() === "emulator"
+      || Boolean(currentForm.romPath || detail?.rom_path || currentForm.emulatorId || detail?.emulator_id || detail?.emulator_profile_name || detail?.emulator_name);
+
+    if (isEmu) {
+      const nextRomPath = String(currentForm.romPath || currentForm.executablePath || "").trim();
+      if (!nextRomPath) {
+        notifyEditor({
+          tone: "warning",
+          title: "ROM path is required.",
+          message: "Select a ROM file or game folder before saving.",
+        });
         return;
+      }
+      let emuName = (emulatorProfiles || []).find((p) => p?.id === currentForm.emulatorId)?.name || detail?.emulator_name || detail?.emulator_profile_name || "";
+      if (!emuName && Array.isArray(emulatorProfiles) && emulatorProfiles.length > 0) {
+        const profileName = detail?.emulator_name || detail?.emulator_profile_name || "";
+        if (profileName) {
+          const matched = emulatorProfiles.find((p) => p?.name?.toLowerCase() === profileName.toLowerCase());
+          if (matched) {
+            emuName = matched.name;
+          }
+        }
+      }
+      const validationError = validateRomFormat(emuName, nextRomPath);
+      if (validationError) {
+        notifyEditorError("Invalid ROM format.", new Error(validationError), "warning");
+        return;
+      }
+    } else {
+      const nextExecutablePath = String(currentForm.executablePath || "").trim();
+      if (nextExecutablePath) {
+        try {
+          await invoke("validate_executable_path", { exePath: nextExecutablePath });
+        } catch (nextError) {
+          notifyEditorError("Invalid executable path.", nextError, "warning");
+          return;
+        }
       }
     }
 
@@ -605,7 +663,7 @@ export default function EditGamePage({ gameId, fallbackGame, initialDetail = nul
               <Field label="Emulator Profile" element="div" required>
                 <PopupSelect
                   value={
-                    (emulatorProfiles || []).find((p) => p?.id === form.emulatorId)?.name || detail?.emulator_profile_name || ""
+                    (emulatorProfiles || []).find((p) => p?.id === form.emulatorId)?.name || detail?.emulator_name || detail?.emulator_profile_name || ""
                   }
                   options={
                     Array.isArray(emulatorProfiles)
@@ -1391,7 +1449,9 @@ function createEmptyForm() {
 
 function buildFormState(detail, fallbackGame) {
   const source = detail || fallbackGame || {};
-  const isEmu = String(source.game_type || detail?.game_type || fallbackGame?.game_type || "").toLowerCase() === "emulator";
+  const isEmu = String(source.game_type || detail?.game_type || fallbackGame?.game_type || "").toLowerCase() === "emulator"
+    || String(source.store || detail?.store || fallbackGame?.store || "").toLowerCase() === "emulator"
+    || Boolean(detail?.rom_path || source?.rom_path || detail?.emulator_id || source?.emulator_id || detail?.emulator_name || detail?.emulator_profile_name);
 
   return {
     name: String(source.name || ""),
@@ -1400,7 +1460,7 @@ function buildFormState(detail, fallbackGame) {
     ageRatingLabel: String(detail?.age_rating?.label || ""),
     completionStatus: String(source.completion_status || "Backlog"),
     gameType: isEmu ? "emulator" : "pc",
-    romPath: String(detail?.rom_path || source.rom_path || ""),
+    romPath: String(detail?.rom_path || source.rom_path || (isEmu ? (detail?.executable_path || source.executable_path) : "") || ""),
     emulatorId: detail?.emulator_id ?? source.emulator_id ?? null,
     executablePath: String(detail?.executable_path || detail?.rom_path || source.rom_path || ""),
     summary: String(detail?.summary || ""),

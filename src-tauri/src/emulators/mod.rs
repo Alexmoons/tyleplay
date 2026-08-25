@@ -82,7 +82,6 @@ pub fn configure_dialog_for_emulator(emu_name: &str, dialog: rfd::FileDialog) ->
                 "wad", "wux", "wud", "m3u",
             ],
         )
-        .add_filter("All Files", &["*"])
 }
 
 pub fn parse_cmd_arguments(args_str: &str) -> Vec<String> {
@@ -125,3 +124,78 @@ pub fn normalize_for_match(title: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
+
+pub fn validate_rom_for_emulator(emu_name: &str, rom_path: &str) -> Result<(), String> {
+    let trimmed = rom_path.trim().trim_matches('"');
+    if trimmed.is_empty() {
+        return Err("ROM path is required for emulator game".to_string());
+    }
+
+    let p = std::path::Path::new(trimmed);
+    let lower_emu = emu_name.trim().to_lowercase();
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    if ext == "exe" {
+        return Err(format!(
+            "{} does not support Windows .exe files. Please select a valid game ROM file or disc image.",
+            if emu_name.trim().is_empty() { "Emulator" } else { emu_name.trim() }
+        ));
+    }
+
+    if lower_emu.contains("rpcs3") || lower_emu.contains("playstation 3") || lower_emu.contains("ps3") {
+        let ps3_res = rpcs3::inspect_ps3_path(trimmed);
+        if !ps3_res.is_valid {
+            if ps3_res.status == "pkg_installer" {
+                return Err("Selected file is a .pkg package installer. Please install it in RPCS3 first, then select its installed game folder or EBOOT.BIN.".to_string());
+            }
+            if p.is_dir() {
+                return Err("Invalid PS3 game folder. It must contain EBOOT.BIN or PARAM.SFO (e.g. inside PS3_GAME/USRDIR).".to_string());
+            }
+            return Err("Invalid ROM format for RPCS3. Supported formats: decrypted .iso, or PS3 game folder containing EBOOT.BIN.".to_string());
+        }
+        return Ok(());
+    }
+
+    if p.is_dir() {
+        return Err(format!(
+            "{} requires a ROM file, not a directory.",
+            if emu_name.trim().is_empty() { "Emulator" } else { emu_name.trim() }
+        ));
+    }
+
+    if lower_emu.contains("pcsx2") || lower_emu.contains("playstation 2") || lower_emu.contains("ps2") {
+        let valid = ["bin", "iso", "cue", "mdf", "chd", "cso", "zso", "gz", "elf", "irx", "gs", "dump"];
+        if !valid.contains(&ext.as_str()) {
+            return Err("Invalid ROM format for PCSX2. Supported formats: .iso, .chd, .bin, .cue, .cso, .zso, .gz, .mdf.".to_string());
+        }
+        return Ok(());
+    }
+
+    if lower_emu.contains("duckstation") || lower_emu.contains("epsxe") || lower_emu.contains("playstation 1") || lower_emu.contains("ps1") || lower_emu.contains("psx") {
+        let valid = ["cue", "chd", "iso", "bin", "img", "mdf", "pbp", "cso", "zso", "ecm"];
+        if !valid.contains(&ext.as_str()) {
+            return Err(format!("Invalid ROM format for {}. Supported formats: .cue, .chd, .iso, .bin, .img, .mdf, .pbp, .cso, .zso, .ecm.", if emu_name.trim().is_empty() { "PS1 emulator" } else { emu_name.trim() }));
+        }
+        return Ok(());
+    }
+
+    if lower_emu.contains("ppsspp") || lower_emu.contains("psp") {
+        let valid = ["iso", "cso", "chd", "pbp", "elf", "prx", "zip"];
+        if !valid.contains(&ext.as_str()) {
+            return Err("Invalid ROM format for PPSSPP. Supported formats: .iso, .cso, .chd, .pbp, .elf, .prx, .zip.".to_string());
+        }
+        return Ok(());
+    }
+
+    let invalid_exts = ["exe", "dll", "msi", "bat", "cmd", "ps1", "vbs", "sys", "com"];
+    if invalid_exts.contains(&ext.as_str()) {
+        return Err(format!("Invalid file format (.{}) for emulator. Please select a valid game ROM file.", ext));
+    }
+
+    Ok(())
+}
+

@@ -540,3 +540,64 @@ export function formatSessionClock(timestamp) {
     hour12: false,
   }).format(new Date(Number(timestamp) * 1000)).replace(":", ".");
 }
+
+export function validateRomFormat(emuName, path) {
+  const trimmed = String(path || "").trim();
+  if (!trimmed) {
+    return "ROM path is required for emulator game.";
+  }
+
+  const cleanPath = trimmed.replace(/^["']|["']$/g, "");
+  const lowerName = String(emuName || "").toLowerCase();
+
+  const lastDot = cleanPath.lastIndexOf(".");
+  const ext = lastDot !== -1 ? cleanPath.slice(lastDot + 1).toLowerCase() : "";
+
+  if (ext === "exe") {
+    return `${emuName || "Emulator"} does not support Windows .exe files. Please select a valid game ROM file or disc image.`;
+  }
+
+  if (lowerName.includes("rpcs3") || lowerName.includes("playstation 3") || lowerName.includes("ps3")) {
+    if (!ext) {
+      // Folder paths are allowed for RPCS3
+      return null;
+    }
+    const rpcs3Exts = ["iso", "bin", "elf", "sfo", "pkg"];
+    if (!rpcs3Exts.includes(ext)) {
+      return "Invalid ROM format for RPCS3. Supported formats: decrypted .iso, or PS3 game folder containing EBOOT.BIN.";
+    }
+    return null;
+  }
+
+  if (lowerName.includes("pcsx2") || lowerName.includes("playstation 2") || lowerName.includes("ps2")) {
+    const pcsx2Exts = ["bin", "iso", "cue", "mdf", "chd", "cso", "zso", "gz", "elf", "irx", "gs", "dump"];
+    if (!pcsx2Exts.includes(ext)) {
+      return "Invalid ROM format for PCSX2. Supported formats: .iso, .chd, .bin, .cue, .cso, .zso, .gz, .mdf.";
+    }
+    return null;
+  }
+
+  if (lowerName.includes("duckstation") || lowerName.includes("epsxe") || lowerName.includes("playstation 1") || lowerName.includes("ps1") || lowerName.includes("psx")) {
+    const ps1Exts = ["cue", "chd", "iso", "bin", "img", "mdf", "pbp", "cso", "zso", "ecm"];
+    if (!ps1Exts.includes(ext)) {
+      return `Invalid ROM format for ${emuName || "PS1 emulator"}. Supported formats: .cue, .chd, .iso, .bin, .img, .mdf, .pbp, .cso, .zso, .ecm.`;
+    }
+    return null;
+  }
+
+  if (lowerName.includes("ppsspp") || lowerName.includes("psp")) {
+    const pspExts = ["iso", "cso", "chd", "pbp", "elf", "prx", "zip"];
+    if (!pspExts.includes(ext)) {
+      return "Invalid ROM format for PPSSPP. Supported formats: .iso, .cso, .chd, .pbp, .elf, .prx, .zip.";
+    }
+    return null;
+  }
+
+  const invalidExts = ["exe", "dll", "msi", "bat", "cmd", "ps1", "vbs", "sys", "com"];
+  if (invalidExts.includes(ext)) {
+    return `Invalid file format (.${ext}) for ${emuName || "emulator"}. Please select a valid game ROM file.`;
+  }
+
+  return null;
+}
+

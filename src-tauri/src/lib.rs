@@ -182,6 +182,7 @@ struct GameSummary {
     game_type: String,
     rom_path: Option<String>,
     emulator_exe_path: Option<String>,
+    emulator_name: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -217,6 +218,11 @@ struct ArchivedGameSummary {
     has_igdb_link: bool,
     primary_exe_name: Option<String>,
     total_seconds: i64,
+    game_type: Option<String>,
+    rom_path: Option<String>,
+    emulator_id: Option<i64>,
+    emulator_name: Option<String>,
+    emulator_profile_name: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -243,6 +249,11 @@ struct ArchivedGameDetail {
     archived_at: i64,
     has_igdb_link: bool,
     primary_exe_name: Option<String>,
+    game_type: Option<String>,
+    rom_path: Option<String>,
+    emulator_id: Option<i64>,
+    emulator_name: Option<String>,
+    emulator_profile_name: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -438,6 +449,7 @@ struct GameDetail {
     game_type: String,
     rom_path: Option<String>,
     emulator_id: Option<i64>,
+    emulator_name: Option<String>,
     emulator_exe_path: Option<String>,
     launch_arguments: Option<String>,
     play_sessions: Vec<PlaySession>,
@@ -639,6 +651,7 @@ struct LocalGameDetailRow {
     game_type: String,
     rom_path: Option<String>,
     emulator_id: Option<i64>,
+    emulator_name: Option<String>,
     emulator_exe_path: Option<String>,
     launch_arguments: Option<String>,
 }
@@ -686,10 +699,15 @@ struct GameRecord {
     completion_status: String,
     user_rating: Option<i32>,
     user_review: Option<String>,
+    game_type: Option<String>,
+    rom_path: Option<String>,
+    emulator_id: Option<i64>,
+    emulator_profile_name: Option<String>,
 }
 
 struct ArchivedGameRecord {
     archive_id: i64,
+    primary_exe_name: Option<String>,
     record: GameRecord,
 }
 
@@ -2403,8 +2421,157 @@ fn run_archive_migrations(conn: &Connection) -> rusqlite::Result<()> {
     let _ = conn.execute("ALTER TABLE archive_sessions ADD COLUMN note TEXT", []);
     let _ = conn.execute("ALTER TABLE archive_games ADD COLUMN game_type TEXT NOT NULL DEFAULT 'pc'", []);
     let _ = conn.execute("ALTER TABLE archive_games ADD COLUMN rom_path TEXT", []);
+    let _ = conn.execute("ALTER TABLE archive_games ADD COLUMN emulator_id INTEGER", []);
+    let _ = conn.execute("ALTER TABLE archive_games ADD COLUMN emulator_profile_name TEXT", []);
     let _ = conn.execute("ALTER TABLE archive_games DROP COLUMN emulator_exe_path", []);
     let _ = conn.execute("ALTER TABLE archive_games DROP COLUMN launch_arguments", []);
+
+    // Reset any PC games that were incorrectly assigned emulator metadata
+    let _ = conn.execute(
+        "UPDATE archive_games
+         SET game_type = 'pc', emulator_profile_name = NULL, emulator_id = NULL
+         WHERE (store IS NOT NULL AND LOWER(store) NOT IN ('emulator'))
+            OR LOWER(COALESCE(primary_exe_name, '')) LIKE '%.exe'
+            OR LOWER(COALESCE(primary_exe_name, '')) LIKE '%.lnk'
+            OR LOWER(COALESCE(primary_exe_name, '')) LIKE '%.bat'",
+        [],
+    );
+
+    // Backfill RPCS3 for PlayStation 3 emulator games in archive
+    let _ = conn.execute(
+        "UPDATE archive_games
+         SET emulator_profile_name = 'RPCS3', game_type = 'emulator'
+         WHERE (store = 'Emulator' OR game_type = 'emulator')
+           AND (
+               LOWER(COALESCE(primary_exe_name, '')) LIKE '%.pkg'
+               OR LOWER(COALESCE(primary_exe_name, '')) LIKE '%eboot.bin'
+               OR (
+                   (LOWER(COALESCE(platforms_json, '')) LIKE '%playstation 3%' OR LOWER(COALESCE(platforms_json, '')) LIKE '%ps3%')
+                   AND (emulator_profile_name IS NULL OR emulator_profile_name = '')
+               )
+           )
+           AND LOWER(COALESCE(primary_exe_name, '')) NOT LIKE '%.exe'
+           AND LOWER(COALESCE(primary_exe_name, '')) NOT LIKE '%.lnk'
+           AND LOWER(COALESCE(primary_exe_name, '')) NOT LIKE '%.bat'
+           AND (store IS NULL OR LOWER(store) = 'emulator')",
+        [],
+    );
+
+    // Backfill PCSX2 for PlayStation 2 emulator games in archive
+    let _ = conn.execute(
+        "UPDATE archive_games
+         SET emulator_profile_name = 'PCSX2', game_type = 'emulator'
+         WHERE (store = 'Emulator' OR game_type = 'emulator')
+           AND (
+               (LOWER(COALESCE(platforms_json, '')) LIKE '%playstation 2%' OR LOWER(COALESCE(platforms_json, '')) LIKE '%ps2%')
+               AND (emulator_profile_name IS NULL OR emulator_profile_name = '')
+           )
+           AND LOWER(COALESCE(primary_exe_name, '')) NOT LIKE '%.exe'
+           AND LOWER(COALESCE(primary_exe_name, '')) NOT LIKE '%.lnk'
+           AND LOWER(COALESCE(primary_exe_name, '')) NOT LIKE '%.bat'
+           AND (store IS NULL OR LOWER(store) = 'emulator')",
+        [],
+    );
+
+    // Backfill PPSSPP for PSP emulator games in archive
+    let _ = conn.execute(
+        "UPDATE archive_games
+         SET emulator_profile_name = 'PPSSPP', game_type = 'emulator'
+         WHERE (store = 'Emulator' OR game_type = 'emulator')
+           AND (
+               LOWER(COALESCE(primary_exe_name, '')) LIKE '%.cso'
+               OR LOWER(COALESCE(primary_exe_name, '')) LIKE '%.pbp'
+               OR (
+                   (LOWER(COALESCE(platforms_json, '')) LIKE '%playstation portable%' OR LOWER(COALESCE(platforms_json, '')) LIKE '%psp%')
+                   AND (emulator_profile_name IS NULL OR emulator_profile_name = '')
+               )
+           )
+           AND LOWER(COALESCE(primary_exe_name, '')) NOT LIKE '%.exe'
+           AND LOWER(COALESCE(primary_exe_name, '')) NOT LIKE '%.lnk'
+           AND LOWER(COALESCE(primary_exe_name, '')) NOT LIKE '%.bat'
+           AND (store IS NULL OR LOWER(store) = 'emulator')",
+        [],
+    );
+
+    // Backfill DuckStation for PlayStation 1 emulator games in archive
+    let _ = conn.execute(
+        "UPDATE archive_games
+         SET emulator_profile_name = 'DuckStation', game_type = 'emulator'
+         WHERE (store = 'Emulator' OR game_type = 'emulator')
+           AND (
+               LOWER(COALESCE(platforms_json, '')) LIKE '%playstation%'
+               AND LOWER(COALESCE(platforms_json, '')) NOT LIKE '%playstation 2%'
+               AND LOWER(COALESCE(platforms_json, '')) NOT LIKE '%playstation 3%'
+               AND LOWER(COALESCE(platforms_json, '')) NOT LIKE '%playstation 4%'
+               AND LOWER(COALESCE(platforms_json, '')) NOT LIKE '%playstation 5%'
+               AND LOWER(COALESCE(platforms_json, '')) NOT LIKE '%playstation portable%'
+               AND LOWER(COALESCE(platforms_json, '')) NOT LIKE '%playstation vita%'
+           )
+           AND (emulator_profile_name IS NULL OR emulator_profile_name = '')
+           AND LOWER(COALESCE(primary_exe_name, '')) NOT LIKE '%.exe'
+           AND LOWER(COALESCE(primary_exe_name, '')) NOT LIKE '%.lnk'
+           AND LOWER(COALESCE(primary_exe_name, '')) NOT LIKE '%.bat'
+           AND (store IS NULL OR LOWER(store) = 'emulator')",
+        [],
+    );
+
+    // Backfill game_type = 'emulator' for any remaining genuine emulator games in archive
+    let _ = conn.execute(
+        "UPDATE archive_games
+         SET game_type = 'emulator'
+         WHERE (store = 'Emulator' OR emulator_profile_name IS NOT NULL)
+           AND LOWER(COALESCE(primary_exe_name, '')) NOT LIKE '%.exe'
+           AND LOWER(COALESCE(primary_exe_name, '')) NOT LIKE '%.lnk'
+           AND LOWER(COALESCE(primary_exe_name, '')) NOT LIKE '%.bat'",
+        [],
+    );
+    // Repair any NULL primary_exe_name or manual_fingerprint in archive_games
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT id, name, store, rom_path, platforms_json FROM archive_games WHERE primary_exe_name IS NULL OR manual_fingerprint IS NULL"
+    ) {
+        let rows: Vec<(i64, String, Option<String>, Option<String>, Option<String>)> = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })
+            .ok()
+            .map(|mapped| mapped.filter_map(Result::ok).collect())
+            .unwrap_or_default();
+        drop(stmt);
+
+        for (id, name, store, rom_path, platforms_json) in rows {
+            let exe_from_rom = rom_path
+                .as_deref()
+                .filter(|p| !p.trim().is_empty())
+                .and_then(|p| Path::new(p).file_name())
+                .and_then(|f| f.to_str())
+                .map(normalize_exe_name);
+
+            let exe_name = exe_from_rom.unwrap_or_else(|| {
+                let p_lower = platforms_json.as_deref().unwrap_or_default().to_lowercase();
+                let ext = if p_lower.contains("playstation 3") || p_lower.contains("ps3") {
+                    "pkg"
+                } else if p_lower.contains("playstation portable") || p_lower.contains("psp") {
+                    "cso"
+                } else {
+                    "iso"
+                };
+                format!("{}.{}", normalize_game_name_for_match(&name), ext)
+            });
+
+            let fingerprint = build_manual_fingerprint(&name, &exe_name, store.as_deref());
+            let _ = conn.execute(
+                "UPDATE archive_games SET primary_exe_name = ?1, manual_fingerprint = ?2 WHERE id = ?3",
+                params![&exe_name, &fingerprint, id],
+            );
+        }
+    }
+
     Ok(())
 }
 
@@ -2858,7 +3025,11 @@ fn load_game_record(conn: &Connection, game_id: i64) -> Result<Option<GameRecord
         updated_at,
         COALESCE(completion_status, 'Backlog') AS completion_status,
         user_rating,
-        user_review
+        user_review,
+        game_type,
+        rom_path,
+        emulator_id,
+        emulator_profile_name
       FROM games
       WHERE id = ?1
       ",
@@ -2899,6 +3070,10 @@ fn load_game_record(conn: &Connection, game_id: i64) -> Result<Option<GameRecord
                 completion_status: row.get(31)?,
                 user_rating: row.get(32)?,
                 user_review: row.get(33)?,
+                game_type: row.get(34)?,
+                rom_path: row.get(35)?,
+                emulator_id: row.get(36)?,
+                emulator_profile_name: row.get(37)?,
             })
         },
     )
@@ -2947,7 +3122,12 @@ fn load_archived_game_record(
         updated_at,
         COALESCE(completion_status, 'Backlog') AS completion_status,
         user_rating,
-        user_review
+        user_review,
+        game_type,
+        rom_path,
+        emulator_id,
+        emulator_profile_name,
+        primary_exe_name
       FROM archive_games
       WHERE id = ?1
       ",
@@ -2955,6 +3135,7 @@ fn load_archived_game_record(
         |row| {
             Ok(ArchivedGameRecord {
                 archive_id: row.get(0)?,
+                primary_exe_name: row.get(39)?,
                 record: GameRecord {
                     name: row.get(1)?,
                     store: row.get(2)?,
@@ -2990,6 +3171,10 @@ fn load_archived_game_record(
                     completion_status: row.get(32)?,
                     user_rating: row.get(33)?,
                     user_review: row.get(34)?,
+                    game_type: row.get(35)?,
+                    rom_path: row.get(36)?,
+                    emulator_id: row.get(37)?,
+                    emulator_profile_name: row.get(38)?,
                 },
             })
         },
@@ -3043,7 +3228,29 @@ fn archive_game(
         .iter()
         .find(|item| item.status == "tracked")
         .or_else(|| executables.first())
-        .map(|item| item.exe_name.clone());
+        .map(|item| item.exe_name.clone())
+        .or_else(|| {
+            game.rom_path
+                .as_deref()
+                .filter(|p| !p.trim().is_empty())
+                .and_then(|path| Path::new(path).file_name())
+                .and_then(|name| name.to_str())
+                .map(normalize_exe_name)
+        })
+        .or_else(|| {
+            if game.game_type.as_deref() == Some("emulator")
+                || game.store.as_deref() == Some("Emulator")
+                || game.emulator_id.is_some()
+                || game.emulator_profile_name.is_some()
+            {
+                Some(format!(
+                    "{}.rom",
+                    normalize_game_name_for_match(&game.name)
+                ))
+            } else {
+                None
+            }
+        });
     let manual_fingerprint = primary_exe_name
         .as_deref()
         .map(|exe_name| build_manual_fingerprint(&game.name, exe_name, game.store.as_deref()));
@@ -3059,14 +3266,16 @@ fn archive_game(
       title_logo_url, use_title_logo, title_logo_position_x, title_logo_position_y, title_logo_zoom, summary,
       release_year, genres_json, platforms_json, developers_json, publishers_json, age_rating_json,
       playtime_adjustment_seconds, igdb_id, steam_appid, steam_assets_json, is_favorite, metadata_locked, primary_exe_name,
-      manual_fingerprint, created_at, updated_at, archived_at, completion_status
+      manual_fingerprint, created_at, updated_at, archived_at, completion_status,
+      game_type, rom_path, emulator_id, emulator_profile_name
     ) VALUES (
       ?1, ?2, ?3, ?4, ?5, ?6, ?7,
       ?8, ?9, ?10, ?11, ?12, ?13, ?14,
       ?15, ?16, ?17, ?18, ?19, ?20,
       ?21, ?22, ?23, ?24, ?25, ?26, ?27,
       ?28, ?29, ?30, ?31, ?32, ?33,
-      ?34, ?35, ?36, ?37
+      ?34, ?35, ?36, ?37,
+      ?38, ?39, ?40, ?41
     )
     ",
         params![
@@ -3106,7 +3315,11 @@ fn archive_game(
             game.created_at,
             game.updated_at,
             now_ts(),
-            game.completion_status
+            game.completion_status,
+            game.game_type,
+            game.rom_path,
+            game.emulator_id,
+            game.emulator_profile_name
         ],
     )
     .map_err(|err| err.to_string())?;
@@ -3296,6 +3509,14 @@ fn restore_archived_game(
         return Err("archived game not found".to_string());
     };
 
+    let is_emulator = archived.record.game_type.as_deref() == Some("emulator")
+        || archived.record.store.as_deref() == Some("Emulator")
+        || archived.record.emulator_id.is_some()
+        || archived.record.emulator_profile_name.is_some();
+
+    let game_type = if is_emulator { "emulator".to_string() } else { "pc".to_string() };
+    let rom_path = if is_emulator { Some(exe_path.to_string()) } else { None };
+
     let tx = main_conn
         .unchecked_transaction()
         .map_err(|err| err.to_string())?;
@@ -3306,12 +3527,14 @@ fn restore_archived_game(
       steam_header_url, backdrop_position_x, backdrop_position_y, backdrop_zoom, title_logo_url, use_title_logo, title_logo_position_x,
       title_logo_position_y, title_logo_zoom, summary, release_year, genres_json,
       platforms_json, developers_json, publishers_json, age_rating_json, playtime_adjustment_seconds,
-      igdb_id, steam_appid, steam_assets_json, is_favorite, metadata_locked, created_at, updated_at, completion_status
+      igdb_id, steam_appid, steam_assets_json, is_favorite, metadata_locked, created_at, updated_at, completion_status,
+      game_type, rom_path, emulator_id, emulator_profile_name
     ) VALUES (
       ?1, ?2, ?3, ?4, ?5, ?6, ?7,
       ?8, ?9, ?10, ?11, ?12, ?13, ?14,
       ?15, ?16, ?17, ?18, ?19, ?20, ?21,
-      ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32
+      ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32,
+      ?33, ?34, ?35, ?36
     )
     ",
     params![
@@ -3346,7 +3569,11 @@ fn restore_archived_game(
       if archived.record.metadata_locked { 1 } else { 0 },
       archived.record.created_at,
       now_ts(),
-      archived.record.completion_status
+      archived.record.completion_status,
+      game_type,
+      rom_path,
+      archived.record.emulator_id,
+      archived.record.emulator_profile_name
     ],
   )
   .map_err(|err| err.to_string())?;
@@ -4729,12 +4956,13 @@ fn query_games(
         g.user_review,
         COALESCE(g.game_type, 'pc') AS game_type,
         g.rom_path,
-        ep.exe_path AS emulator_exe_path
+        ep.exe_path AS emulator_exe_path,
+        COALESCE(ep.name, g.emulator_profile_name) AS emulator_name
       FROM games g
       LEFT JOIN emulator_profiles ep ON ep.id = g.emulator_id
       LEFT JOIN sessions s ON s.game_id = g.id AND s.duration_seconds IS NOT NULL
       LEFT JOIN executables e ON e.game_id = g.id AND e.status = 'tracked'
-      GROUP BY g.id, g.name, g.igdb_id, g.steam_appid, g.store, g.cover_url, g.steam_header_url, g.cover_position_x, g.cover_position_y, g.cover_zoom, g.backdrop_url, g.backdrop_position_x, g.backdrop_position_y, g.backdrop_zoom, g.created_at, g.release_year, g.playtime_adjustment_seconds, g.is_favorite, g.completion_status, g.user_rating, g.user_review, g.game_type, g.rom_path, ep.exe_path
+      GROUP BY g.id, g.name, g.igdb_id, g.steam_appid, g.store, g.cover_url, g.steam_header_url, g.cover_position_x, g.cover_position_y, g.cover_zoom, g.backdrop_url, g.backdrop_position_x, g.backdrop_position_y, g.backdrop_zoom, g.created_at, g.release_year, g.playtime_adjustment_seconds, g.is_favorite, g.completion_status, g.user_rating, g.user_review, g.game_type, g.rom_path, ep.exe_path, ep.name, g.emulator_profile_name
       ORDER BY tracked_total_seconds + g.playtime_adjustment_seconds DESC, last_played DESC, g.name ASC
       {}
     ",
@@ -4751,6 +4979,7 @@ fn query_games(
             let game_type = row.get::<_, Option<String>>(25)?.unwrap_or_else(|| "pc".to_string());
             let rom_path = row.get::<_, Option<String>>(26)?;
             let emulator_exe_path = row.get::<_, Option<String>>(27)?;
+            let emulator_name = row.get::<_, Option<String>>(28)?;
 
             let raw_path = if game_type == "emulator" {
                 rom_path.as_deref().or(raw_exe_path.as_deref())
@@ -4817,6 +5046,7 @@ fn query_games(
                 game_type,
                 rom_path,
                 emulator_exe_path,
+                emulator_name,
             })
         })
         .map_err(|err| err.to_string())?;
@@ -4859,12 +5089,16 @@ fn query_archived_games(conn: &Connection) -> Result<Vec<ArchivedGameSummary>, S
         g.archived_at,
         g.igdb_id,
         g.primary_exe_name,
-        COALESCE(SUM(s.duration_seconds), 0) + g.playtime_adjustment_seconds AS total_seconds
+        COALESCE(SUM(s.duration_seconds), 0) + g.playtime_adjustment_seconds AS total_seconds,
+        g.game_type,
+        g.rom_path,
+        g.emulator_id,
+        g.emulator_profile_name
       FROM archive_games g
       LEFT JOIN archive_sessions s ON s.archive_game_id = g.id AND s.duration_seconds IS NOT NULL
       GROUP BY
         g.id, g.name, g.cover_url, g.store, g.release_year, g.archived_at, g.igdb_id,
-        g.primary_exe_name, g.playtime_adjustment_seconds
+        g.primary_exe_name, g.playtime_adjustment_seconds, g.game_type, g.rom_path, g.emulator_id, g.emulator_profile_name
       ORDER BY g.archived_at DESC, g.id DESC
       ",
         )
@@ -4872,6 +5106,7 @@ fn query_archived_games(conn: &Connection) -> Result<Vec<ArchivedGameSummary>, S
 
     let rows = stmt
         .query_map([], |row| {
+            let emulator_profile_name: Option<String> = row.get(12)?;
             Ok(ArchivedGameSummary {
                 archive_id: row.get(0)?,
                 name: row.get(1)?,
@@ -4882,6 +5117,11 @@ fn query_archived_games(conn: &Connection) -> Result<Vec<ArchivedGameSummary>, S
                 has_igdb_link: row.get::<_, Option<i64>>(6)?.is_some(),
                 primary_exe_name: row.get(7)?,
                 total_seconds: row.get(8)?,
+                game_type: row.get(9)?,
+                rom_path: row.get(10)?,
+                emulator_id: row.get(11)?,
+                emulator_name: emulator_profile_name.clone(),
+                emulator_profile_name,
             })
         })
         .map_err(|err| format!("failed to read archive list: {err}"))?;
@@ -4921,13 +5161,17 @@ fn query_archived_games_by_name(
         g.archived_at,
         g.igdb_id,
         g.primary_exe_name,
-        COALESCE(SUM(s.duration_seconds), 0) + g.playtime_adjustment_seconds AS total_seconds
+        COALESCE(SUM(s.duration_seconds), 0) + g.playtime_adjustment_seconds AS total_seconds,
+        g.game_type,
+        g.rom_path,
+        g.emulator_id,
+        g.emulator_profile_name
       FROM archive_games g
       LEFT JOIN archive_sessions s ON s.archive_game_id = g.id AND s.duration_seconds IS NOT NULL
       WHERE g.normalized_name LIKE ?1
       GROUP BY
         g.id, g.name, g.cover_url, g.store, g.release_year, g.archived_at, g.igdb_id,
-        g.primary_exe_name, g.playtime_adjustment_seconds
+        g.primary_exe_name, g.playtime_adjustment_seconds, g.game_type, g.rom_path, g.emulator_id, g.emulator_profile_name
       ORDER BY g.archived_at DESC, g.id DESC
       LIMIT 20
       ",
@@ -4936,6 +5180,7 @@ fn query_archived_games_by_name(
 
     let rows = stmt
         .query_map(params![like_query], |row| {
+            let emulator_profile_name: Option<String> = row.get(12)?;
             Ok(ArchivedGameSummary {
                 archive_id: row.get(0)?,
                 name: row.get(1)?,
@@ -4946,6 +5191,11 @@ fn query_archived_games_by_name(
                 has_igdb_link: row.get::<_, Option<i64>>(6)?.is_some(),
                 primary_exe_name: row.get(7)?,
                 total_seconds: row.get(8)?,
+                game_type: row.get(9)?,
+                rom_path: row.get(10)?,
+                emulator_id: row.get(11)?,
+                emulator_name: emulator_profile_name.clone(),
+                emulator_profile_name,
             })
         })
         .map_err(|err| format!("failed to read archive search results: {err}"))?;
@@ -4986,12 +5236,17 @@ fn query_archived_game_detail(
           SELECT SUM(duration_seconds)
           FROM archive_sessions
           WHERE archive_game_id = g.id AND duration_seconds IS NOT NULL
-        ), 0) + g.playtime_adjustment_seconds AS total_seconds
+        ), 0) + g.playtime_adjustment_seconds AS total_seconds,
+        g.game_type,
+        g.rom_path,
+        g.emulator_id,
+        g.emulator_profile_name
       FROM archive_games g
       WHERE g.id = ?1
       ",
         params![archive_id],
         |row| {
+            let emulator_profile_name: Option<String> = row.get(25)?;
             Ok(ArchivedGameDetail {
                 archive_id: row.get(0)?,
                 name: row.get(1)?,
@@ -5015,6 +5270,11 @@ fn query_archived_game_detail(
                 has_igdb_link: row.get::<_, Option<i64>>(19)?.is_some(),
                 primary_exe_name: row.get(20)?,
                 total_seconds: row.get(21)?,
+                game_type: row.get(22)?,
+                rom_path: row.get(23)?,
+                emulator_id: row.get(24)?,
+                emulator_name: emulator_profile_name.clone(),
+                emulator_profile_name,
             })
         },
     )
@@ -5415,6 +5675,13 @@ fn add_game(
 
     let (exe_name, final_exe_path, exe_path_display) = if is_emulator {
         let raw_rom = rom_path.clone().unwrap_or_else(|| exe_path.clone());
+        let emu_profile_name: String = if let Some(emu_id) = emulator_id {
+            conn.query_row("SELECT name FROM emulator_profiles WHERE id = ?1", params![emu_id], |r| r.get(0)).optional().unwrap_or(None).unwrap_or_default()
+        } else {
+            String::new()
+        };
+        emulators::validate_rom_for_emulator(&emu_profile_name, &raw_rom)?;
+
         let resolved_rom = emulators::rpcs3::resolve_rpcs3_boot_target(&raw_rom);
         let norm_rom = normalize_exe_path(&resolved_rom);
         if norm_rom.is_empty() {
@@ -5452,8 +5719,12 @@ fn add_game(
             .extension()
             .and_then(|value| value.to_str())
             .map(|value| value.to_ascii_lowercase());
-        if extension.as_deref() != Some("exe") {
-            return Err("exe path must point to a .exe file".to_string());
+        let valid_ext = match extension.as_deref() {
+            Some("exe") | Some("lnk") | Some("bat") => true,
+            _ => false,
+        };
+        if !valid_ext {
+            return Err("executable path must point to a .exe, .lnk, or .bat file".to_string());
         }
         let name = Path::new(&norm_exe)
             .file_name()
@@ -5835,6 +6106,122 @@ fn pick_rom_path(emulator_name: Option<String>) -> Option<String> {
 }
 
 #[tauri::command]
+fn pick_archived_game_rom_path(
+    state: tauri::State<AppState>,
+    archive_id: i64,
+) -> Result<Option<String>, String> {
+    let archive_conn = state
+        .archive_db
+        .lock()
+        .map_err(|_| "archive database lock poisoned")?;
+    let archived = load_archived_game_record(&archive_conn, archive_id)?
+        .ok_or_else(|| "archived game not found".to_string())?;
+
+    let is_emu = archived.record.game_type.as_deref() == Some("emulator")
+        || archived.record.store.as_deref() == Some("Emulator")
+        || archived.record.emulator_id.is_some()
+        || archived.record.emulator_profile_name.is_some();
+
+    if !is_emu {
+        return Err("This is a PC game, not an emulator game.".to_string());
+    }
+
+    let main_conn = state.db.lock().map_err(|_| "database lock poisoned")?;
+
+    let mut emu_name = archived
+        .record
+        .emulator_profile_name
+        .clone()
+        .unwrap_or_default();
+
+    if emu_name.trim().is_empty() {
+        let exec_paths: Vec<String> = archive_conn
+            .prepare("SELECT exe_path, exe_name FROM archive_executables WHERE archive_game_id = ?1")
+            .map_err(|err| err.to_string())?
+            .query_map(params![archive_id], |row| {
+                Ok(format!(
+                    "{} {}",
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?
+                ))
+            })
+            .map_err(|err| err.to_string())?
+            .filter_map(Result::ok)
+            .collect();
+
+        let all_text = format!(
+            "{} {} {} {}",
+            archived.record.name,
+            archived.record.platforms_json.as_deref().unwrap_or_default(),
+            archived.primary_exe_name.as_deref().unwrap_or_default(),
+            exec_paths.join(" ")
+        )
+        .to_lowercase();
+
+        if all_text.contains("playstation 3")
+            || all_text.contains("ps3")
+            || all_text.contains(".pkg")
+            || all_text.contains("eboot.bin")
+            || all_text.contains("rpcs3")
+        {
+            emu_name = "RPCS3".to_string();
+        } else if all_text.contains("playstation 2")
+            || all_text.contains("ps2")
+            || all_text.contains("pcsx2")
+            || all_text.contains("shaolin monks")
+        {
+            emu_name = "PCSX2".to_string();
+        } else if all_text.contains("playstation portable")
+            || all_text.contains("psp")
+            || all_text.contains(".cso")
+            || all_text.contains(".pbp")
+            || all_text.contains("ppsspp")
+        {
+            emu_name = "PPSSPP".to_string();
+        } else if all_text.contains("playstation")
+            || all_text.contains("ps1")
+            || all_text.contains("psx")
+            || all_text.contains("duckstation")
+            || all_text.contains("epsxe")
+        {
+            emu_name = "DuckStation".to_string();
+        } else {
+            let profiles: Vec<String> = main_conn
+                .prepare("SELECT name FROM emulator_profiles ORDER BY id ASC")
+                .map_err(|err| err.to_string())?
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(|err| err.to_string())?
+                .filter_map(Result::ok)
+                .collect();
+
+            if profiles.len() == 1 {
+                emu_name = profiles[0].clone();
+            } else if let Some(p) = profiles.iter().find(|p| p.to_lowercase().contains("pcsx2")) {
+                emu_name = p.clone();
+            } else if let Some(first) = profiles.first() {
+                emu_name = first.clone();
+            }
+        }
+
+        if !emu_name.is_empty() {
+            let _ = archive_conn.execute(
+                "UPDATE archive_games SET emulator_profile_name = ?1, game_type = 'emulator' WHERE id = ?2",
+                params![&emu_name, archive_id],
+            );
+        }
+    }
+
+    drop(main_conn);
+    drop(archive_conn);
+
+    let dialog = rfd::FileDialog::new();
+    let dialog = emulators::configure_dialog_for_emulator(&emu_name, dialog);
+    Ok(dialog
+        .pick_file()
+        .map(|path| path.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
 fn pick_folder_path() -> Option<String> {
     rfd::FileDialog::new()
         .pick_folder()
@@ -6042,30 +6429,6 @@ fn restore_archived_game_entry(
     archive_id: i64,
     exe_path: String,
 ) -> Result<AddGameResult, String> {
-    let exe_path_display = display_exe_path(&exe_path);
-    let exe_path = normalize_exe_path(&exe_path);
-    if exe_path.is_empty() {
-        return Err("exe path is required".to_string());
-    }
-
-    let extension = Path::new(&exe_path)
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| value.to_ascii_lowercase());
-    if extension.as_deref() != Some("exe") {
-        return Err("exe path must point to a .exe file".to_string());
-    }
-
-    let exe_name = Path::new(&exe_path)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .map(normalize_exe_name)
-        .ok_or_else(|| "failed to read exe file name".to_string())?;
-
-    if exe_name.is_empty() {
-        return Err("failed to read exe file name".to_string());
-    }
-
     let archive_conn = state
         .archive_db
         .lock()
@@ -6073,6 +6436,104 @@ fn restore_archived_game_entry(
     let _ = purge_expired_archived_games(&archive_conn)?;
     let archived = load_archived_game_record(&archive_conn, archive_id)?
         .ok_or_else(|| "archived game not found".to_string())?;
+
+    let is_emulator = archived.record.game_type.as_deref() == Some("emulator")
+        || archived.record.store.as_deref() == Some("Emulator")
+        || archived.record.emulator_id.is_some()
+        || archived.record.emulator_profile_name.is_some()
+        || archived.record.rom_path.is_some()
+        || {
+            let p = archived.primary_exe_name.as_deref().unwrap_or_default().to_lowercase();
+            p.ends_with(".iso")
+                || p.ends_with(".bin")
+                || p.ends_with(".cue")
+                || p.ends_with(".pkg")
+                || p.ends_with(".cso")
+                || p.ends_with(".chd")
+                || p.ends_with(".pbp")
+                || p.ends_with(".m3u")
+                || p.ends_with(".elf")
+                || p.contains("eboot.bin")
+        };
+
+    let (exe_name, final_exe_path, exe_path_display) = if is_emulator {
+        let emu_name = archived
+            .record
+            .emulator_profile_name
+            .as_deref()
+            .unwrap_or_else(|| {
+                let platforms = archived
+                    .record
+                    .platforms_json
+                    .as_deref()
+                    .unwrap_or_default()
+                    .to_lowercase();
+                let p = archived
+                    .primary_exe_name
+                    .as_deref()
+                    .unwrap_or_default()
+                    .to_lowercase();
+                if platforms.contains("playstation 3")
+                    || platforms.contains("ps3")
+                    || p.ends_with(".pkg")
+                    || p.contains("eboot.bin")
+                {
+                    "RPCS3"
+                } else if platforms.contains("playstation 2") || platforms.contains("ps2") {
+                    "PCSX2"
+                } else if platforms.contains("playstation portable")
+                    || platforms.contains("psp")
+                    || p.ends_with(".cso")
+                    || p.ends_with(".pbp")
+                {
+                    "PPSSPP"
+                } else if platforms.contains("playstation") {
+                    "DuckStation"
+                } else {
+                    ""
+                }
+            });
+        emulators::validate_rom_for_emulator(emu_name, &exe_path)?;
+        let resolved_rom = emulators::rpcs3::resolve_rpcs3_boot_target(&exe_path);
+        let norm_rom = normalize_exe_path(&resolved_rom);
+        let file_name = Path::new(&norm_rom)
+            .file_name()
+            .and_then(|v| v.to_str())
+            .map(normalize_exe_name)
+            .unwrap_or_else(|| "game.rom".to_string());
+        let display = display_exe_path(&resolved_rom);
+        (file_name, norm_rom, display)
+    } else {
+        let exe_path_display = display_exe_path(&exe_path);
+        let exe_path = normalize_exe_path(&exe_path);
+        if exe_path.is_empty() {
+            return Err("exe path is required".to_string());
+        }
+
+        let extension = Path::new(&exe_path)
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_ascii_lowercase());
+        let valid_ext = match extension.as_deref() {
+            Some("exe") | Some("lnk") | Some("bat") => true,
+            _ => false,
+        };
+        if !valid_ext {
+            return Err("executable path must point to a .exe, .lnk, or .bat file".to_string());
+        }
+
+        let exe_name = Path::new(&exe_path)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(normalize_exe_name)
+            .ok_or_else(|| "failed to read exe file name".to_string())?;
+
+        if exe_name.is_empty() {
+            return Err("failed to read exe file name".to_string());
+        }
+
+        (exe_name, exe_path, exe_path_display)
+    };
 
     let mut conn = state.db.lock().map_err(|_| "database lock poisoned")?;
     let existing_assignment = conn
@@ -6083,7 +6544,7 @@ fn restore_archived_game_entry(
       WHERE exe_name = ?1 AND exe_path = ?2
       LIMIT 1
       ",
-            params![exe_name, exe_path],
+            params![exe_name, final_exe_path],
             |row| row.get::<_, Option<i64>>(0),
         )
         .optional()
@@ -6102,7 +6563,7 @@ fn restore_archived_game_entry(
             .unwrap_or_else(|| "another game".to_string());
 
         return Err(format!(
-      "this executable is already linked to \"{existing_game_name}\". Use a different .exe or delete/update the existing game first."
+      "this executable is already linked to \"{existing_game_name}\". Use a different executable or delete/update the existing game first."
     ));
     }
 
@@ -6111,7 +6572,7 @@ fn restore_archived_game_entry(
         &archive_conn,
         archive_id,
         &exe_name,
-        &exe_path,
+        &final_exe_path,
         &exe_path_display,
     )?;
 
@@ -6204,6 +6665,18 @@ fn update_game_metadata(
     let now = now_ts();
 
     let conn = state.db.lock().map_err(|_| "database lock poisoned")?;
+    if input.game_type.as_deref() == Some("emulator") {
+        if let Some(rom_p) = input.rom_path.as_deref() {
+            let emu_name = input.emulator_id.and_then(|emu_id| {
+                conn.query_row("SELECT name FROM emulator_profiles WHERE id = ?1", params![emu_id], |r| r.get::<_, String>(0)).optional().unwrap_or(None)
+            }).or_else(|| {
+                conn.query_row("SELECT emulator_profile_name FROM games WHERE id = ?1", params![input.game_id], |r| r.get::<_, String>(0)).optional().unwrap_or(None)
+            }).unwrap_or_default();
+
+            emulators::validate_rom_for_emulator(&emu_name, rom_p)?;
+        }
+    }
+
     let updated = conn
         .execute(
             "
@@ -6291,10 +6764,16 @@ fn update_game_metadata(
             .and_then(|v| v.to_str())
             .map(normalize_exe_name)
             .unwrap_or_default();
-        let _ = conn.execute(
+        let rows_affected = conn.execute(
             "UPDATE executables SET exe_path = ?1, exe_name = ?2, exe_path_display = ?3, updated_at = ?4 WHERE game_id = ?5",
             params![norm_rom, rom_name, display_exe_path(&norm_rom), now, input.game_id],
-        );
+        ).unwrap_or(0);
+        if rows_affected == 0 && !norm_rom.is_empty() {
+            let _ = conn.execute(
+                "INSERT INTO executables (game_id, exe_name, exe_path, exe_path_display, status, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'tracked', ?5, ?5)",
+                params![input.game_id, rom_name, norm_rom, display_exe_path(&norm_rom), now],
+            );
+        }
     }
 
     Ok(())
@@ -6408,8 +6887,12 @@ fn update_game_executable(
         .extension()
         .and_then(|value| value.to_str())
         .map(|value| value.to_ascii_lowercase());
-    if extension.as_deref() != Some("exe") {
-        return Err("exe path must point to a .exe file".to_string());
+    let valid_ext = match extension.as_deref() {
+        Some("exe") | Some("lnk") | Some("bat") => true,
+        _ => false,
+    };
+    if !valid_ext {
+        return Err("executable path must point to a .exe, .lnk, or .bat file".to_string());
     }
 
     let exe_name = Path::new(&exe_path)
@@ -6579,14 +7062,18 @@ fn validate_executable_path(exe_path: String) -> Result<(), String> {
         .extension()
         .and_then(|value| value.to_str())
         .map(|value| value.to_ascii_lowercase());
-    if extension.as_deref() != Some("exe") {
-        return Err("exe path must point to a .exe file".to_string());
+    let valid_ext = match extension.as_deref() {
+        Some("exe") | Some("lnk") | Some("bat") => true,
+        _ => false,
+    };
+    if !valid_ext {
+        return Err("executable path must point to a .exe, .lnk, or .bat file".to_string());
     }
 
     let metadata = fs::metadata(&exe_path)
-        .map_err(|_| "exe file was not found at that path".to_string())?;
+        .map_err(|_| "executable file was not found at that path".to_string())?;
     if !metadata.is_file() {
-        return Err("exe path must point to a file".to_string());
+        return Err("executable path must point to a file".to_string());
     }
 
     Ok(())
@@ -7560,13 +8047,14 @@ fn query_local_game_detail(
         g.rom_path,
         g.emulator_id,
         ep.exe_path AS emulator_exe_path,
-        ep.default_args AS launch_arguments
+        ep.default_args AS launch_arguments,
+        COALESCE(ep.name, g.emulator_profile_name) AS emulator_name
       FROM games g
       LEFT JOIN emulator_profiles ep ON ep.id = g.emulator_id
       LEFT JOIN sessions s ON s.game_id = g.id AND s.duration_seconds IS NOT NULL
       LEFT JOIN executables e ON e.game_id = g.id AND e.status = 'tracked'
       WHERE g.id = ?1
-      GROUP BY g.id, g.name, g.store, g.cover_url, g.cover_position_x, g.cover_position_y, g.cover_zoom, g.backdrop_url, g.steam_header_url, g.backdrop_position_x, g.backdrop_position_y, g.backdrop_zoom, g.title_logo_url, g.use_title_logo, g.title_logo_position_x, g.title_logo_position_y, g.title_logo_zoom, g.igdb_id, g.metadata_locked, g.created_at, g.updated_at, g.release_year, g.summary, g.genres_json, g.platforms_json, g.developers_json, g.publishers_json, g.age_rating_json, g.playtime_adjustment_seconds, g.is_favorite, g.completion_status, g.user_rating, g.user_review, g.game_type, g.rom_path, g.emulator_id, ep.exe_path, ep.default_args
+      GROUP BY g.id, g.name, g.store, g.cover_url, g.cover_position_x, g.cover_position_y, g.cover_zoom, g.backdrop_url, g.steam_header_url, g.backdrop_position_x, g.backdrop_position_y, g.backdrop_zoom, g.title_logo_url, g.use_title_logo, g.title_logo_position_x, g.title_logo_position_y, g.title_logo_zoom, g.igdb_id, g.metadata_locked, g.created_at, g.updated_at, g.release_year, g.summary, g.genres_json, g.platforms_json, g.developers_json, g.publishers_json, g.age_rating_json, g.playtime_adjustment_seconds, g.is_favorite, g.completion_status, g.user_rating, g.user_review, g.game_type, g.rom_path, g.emulator_id, ep.exe_path, ep.default_args, ep.name, g.emulator_profile_name
       ",
       params![game_id],
       |row| {
@@ -7579,6 +8067,7 @@ fn query_local_game_detail(
         let emulator_id = row.get::<_, Option<i64>>(40)?;
         let emulator_exe_path = row.get::<_, Option<String>>(41)?;
         let launch_arguments = row.get::<_, Option<String>>(42)?;
+        let emulator_name = row.get::<_, Option<String>>(43)?;
 
         let raw_path = if game_type == "emulator" {
           rom_path.as_deref().or(raw_executable_path.as_deref())
@@ -7660,6 +8149,7 @@ fn query_local_game_detail(
           game_type,
           rom_path,
           emulator_id,
+          emulator_name,
           emulator_exe_path,
           launch_arguments,
         })
@@ -8087,6 +8577,7 @@ fn get_game_detail(state: tauri::State<AppState>, game_id: i64) -> Result<GameDe
         game_type: local.game_type,
         rom_path: local.rom_path,
         emulator_id: local.emulator_id,
+        emulator_name: local.emulator_name,
         emulator_exe_path: local.emulator_exe_path,
         launch_arguments: local.launch_arguments,
         play_sessions: query_game_sessions(&conn, game_id, &tracker)?,
@@ -8250,7 +8741,27 @@ fn launch_game(state: tauri::State<AppState>, game_id: i64) -> Result<(), String
             return Err(format!("Game executable file was not found on disk: {exe_path}"));
         }
 
-        match Command::new(&exe_path).spawn() {
+        let path_lower = exe_path.to_lowercase();
+        let spawn_res = if path_lower.ends_with(".lnk") || path_lower.ends_with(".bat") {
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                let escaped_path = exe_path.replace('\'', "''");
+                let command = format!("Start-Process -FilePath '{}'", escaped_path);
+                Command::new("powershell")
+                    .args(["-NoProfile", "-NonInteractive", "-Command", &command])
+                    .creation_flags(0x08000000)
+                    .spawn()
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                Command::new(&exe_path).spawn()
+            }
+        } else {
+            Command::new(&exe_path).spawn()
+        };
+
+        match spawn_res {
             Ok(_) => {}
             Err(err) if err.raw_os_error() == Some(740) => launch_game_with_elevation(&exe_path)?,
             Err(err) => return Err(format!("failed to launch game: {err}")),
@@ -9512,6 +10023,7 @@ pub fn run() {
             save_emulator_profile,
             delete_emulator_profile,
             pick_rom_path,
+            pick_archived_game_rom_path,
             pick_folder_path,
             check_ps3_rom_status
         ])

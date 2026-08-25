@@ -1057,6 +1057,11 @@ export async function invoke(command, args) {
       publishers: [],
       age_rating: null,
       created_at: summary?.created_at || Math.floor(Date.now() / 1000),
+      game_type: summary?.game_type || "pc",
+      rom_path: summary?.rom_path || null,
+      emulator_id: summary?.emulator_id || null,
+      emulator_name: summary?.emulator_name || summary?.emulator_profile_name || null,
+      emulator_profile_name: summary?.emulator_profile_name || null,
       play_sessions: []
     };
   }
@@ -1074,8 +1079,8 @@ export async function invoke(command, args) {
     if (!exePath) {
       throw new Error("exe path is required");
     }
-    if (!/\.exe$/i.test(exePath)) {
-      throw new Error("exe path must point to a .exe file");
+    if (!/\.(exe|lnk|bat)$/i.test(exePath)) {
+      throw new Error("executable path must point to a .exe, .lnk, or .bat file");
     }
     if (/missing|invalid|not-found/i.test(exePath)) {
       throw new Error("exe file was not found at that path");

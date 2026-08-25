@@ -13,6 +13,7 @@ import {
   PAGE_SIZE,
   setPlaytimeDisplayMode,
   sortLibrary,
+  validateRomFormat,
 } from "./lib/game-helpers";
 import WindowTitlebar from "./components/WindowTitlebar";
 import Sidebar from "./components/Sidebar";
@@ -1305,21 +1306,56 @@ function App() {
     return false;
   }
 
-  async function handleRestoreArchivedGame(game) {
+  async function handleRestoreArchivedGame(game, options = {}) {
     if (!game?.archive_id) {
       return;
     }
 
     try {
       setRestoringArchiveId(game.archive_id);
-      const exePath = await invoke("pick_exe_path");
-      if (!exePath) {
-        return;
+      const pName = String(game?.primary_exe_name || "").toLowerCase();
+      const isRomFile =
+        /\.(iso|bin|cue|pkg|cso|chd|pbp|m3u|elf|rap|mdf|zso|gz)$/i.test(pName) ||
+        pName.includes("eboot.bin");
+
+      const isEmu =
+        String(game?.game_type || game?.store || "").toLowerCase() === "emulator" ||
+        Boolean(game?.emulator_id || game?.emulator_name || game?.emulator_profile_name || game?.rom_path) ||
+        isRomFile;
+
+      let targetPath = null;
+      if (isEmu) {
+        if (options?.mode === "folder") {
+          const selectedFolder = await invoke("pick_folder_path");
+          if (!selectedFolder) {
+            return;
+          }
+          let pathToUse = selectedFolder;
+          try {
+            const statusResult = await invoke("check_ps3_rom_status", { path: selectedFolder });
+            if (statusResult?.detected_file) {
+              pathToUse = statusResult.detected_file;
+            }
+          } catch {
+            // fallback to selected folder
+          }
+          targetPath = pathToUse;
+        } else {
+          targetPath = await invoke("pick_archived_game_rom_path", { archiveId: Number(game.archive_id) });
+          if (!targetPath) {
+            return;
+          }
+        }
+      } else {
+        targetPath = await invoke("pick_exe_path");
+        if (!targetPath) {
+          return;
+        }
       }
 
       const result = await invoke("restore_archived_game_entry", {
         archiveId: Number(game.archive_id),
-        exePath,
+        exePath: targetPath,
       });
 
       await refreshLibraryData();

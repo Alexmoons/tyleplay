@@ -49,6 +49,105 @@ function truncateExeBadgeText(value, maxLength = 58) {
   return `...${text.slice(-(maxLength - 3))}`;
 }
 
+function getArchivedGameStoreBadge(game) {
+  if (!game) return null;
+  if (game.store) {
+    return game.store;
+  }
+  const isEmu =
+    String(game.game_type || "").toLowerCase() === "emulator" ||
+    Boolean(game.emulator_id || game.rom_path);
+  if (isEmu) {
+    return "Emulator";
+  }
+  return null;
+}
+
+function getArchivedGameEmulatorProfileBadge(game) {
+  if (!game) return null;
+  const isEmu =
+    String(game.game_type || "").toLowerCase() === "emulator" ||
+    String(game.store || "").toLowerCase() === "emulator";
+  if (!isEmu) {
+    return null;
+  }
+  const name = game.emulator_name || game.emulator_profile_name;
+  if (name && name.trim().toLowerCase() !== "emulator") {
+    return name.trim();
+  }
+  return null;
+}
+
+function ArchiveRestoreDropdown({
+  game,
+  isRestoring,
+  disabled,
+  onRestoreFile,
+  onRestoreFolder,
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    function handlePointerDown(event) {
+      if (!rootRef.current?.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [isOpen]);
+
+  return (
+    <div ref={rootRef} className="browse-dropdown-wrapper" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        className={`action-button action-button-primary archive-restore-button browse-dropdown-trigger${isOpen ? " is-open" : ""}`}
+        disabled={isRestoring || disabled}
+        onClick={(event) => {
+          event.stopPropagation();
+          setIsOpen((prev) => !prev);
+        }}
+      >
+        <span>{isRestoring ? "Restoring..." : "Restore"}</span>
+        <ChevronDownIcon className="browse-dropdown-chevron" />
+      </button>
+
+      {isOpen && (
+        <div className="browse-dropdown-panel">
+          <button
+            type="button"
+            className="browse-dropdown-item"
+            onClick={(event) => {
+              event.stopPropagation();
+              setIsOpen(false);
+              onRestoreFile?.(game);
+            }}
+          >
+            <FolderIcon />
+            <span>Choose Decrypted ROM File (.iso)</span>
+          </button>
+          <button
+            type="button"
+            className="browse-dropdown-item"
+            onClick={(event) => {
+              event.stopPropagation();
+              setIsOpen(false);
+              onRestoreFolder?.(game);
+            }}
+          >
+            <FolderIcon />
+            <span>Choose Game Folder</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function formatArchiveExpiry(value) {
   const archivedAt = Number(value || 0);
   if (!archivedAt) {
@@ -312,7 +411,8 @@ export default function ArchivePage({
                       {game.name}
                     </ArchiveTooltipAnchor>
                     <div className="archive-card-meta">
-                      {game.store ? <span>{game.store}</span> : null}
+                      {getArchivedGameStoreBadge(game) ? <span>{getArchivedGameStoreBadge(game)}</span> : null}
+                      {getArchivedGameEmulatorProfileBadge(game) ? <span>{getArchivedGameEmulatorProfileBadge(game)}</span> : null}
                       {game.release_year ? <span>{game.release_year}</span> : null}
                       <span>{game.has_igdb_link ? "Metadata linked" : "Manual entry"}</span>
                       <span>{formatDurationLong(game.total_seconds || 0)}</span>
@@ -347,17 +447,27 @@ export default function ArchivePage({
                     <span>{deletingArchiveId === game.archive_id ? "Deleting..." : "Delete Permanently"}</span>
                   </button>
 
-                  <button
-                    type="button"
-                    className="action-button action-button-primary archive-restore-button"
-                    disabled={restoringArchiveId === game.archive_id || deletingArchiveId === game.archive_id}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onRestore?.(game);
-                    }}
-                  >
-                    <span>{restoringArchiveId === game.archive_id ? "Restoring..." : "Restore"}</span>
-                  </button>
+                  {String(game.emulator_name || game.emulator_profile_name || "").toLowerCase().includes("rpcs3") ? (
+                    <ArchiveRestoreDropdown
+                      game={game}
+                      isRestoring={restoringArchiveId === game.archive_id}
+                      disabled={deletingArchiveId === game.archive_id}
+                      onRestoreFile={(g) => onRestore?.(g, { mode: "file" })}
+                      onRestoreFolder={(g) => onRestore?.(g, { mode: "folder" })}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="action-button action-button-primary archive-restore-button"
+                      disabled={restoringArchiveId === game.archive_id || deletingArchiveId === game.archive_id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onRestore?.(game);
+                      }}
+                    >
+                      <span>{restoringArchiveId === game.archive_id ? "Restoring..." : "Restore"}</span>
+                    </button>
+                  )}
                 </div>
               </article>
             ))}
@@ -445,7 +555,8 @@ export default function ArchivePage({
                   </div>
                   <div className="archive-detail-copy">
                     <div className="archive-detail-meta">
-                      {detail.store ? <span>{detail.store}</span> : null}
+                      {getArchivedGameStoreBadge(detail || selectedGame) ? <span>{getArchivedGameStoreBadge(detail || selectedGame)}</span> : null}
+                      {getArchivedGameEmulatorProfileBadge(detail || selectedGame) ? <span>{getArchivedGameEmulatorProfileBadge(detail || selectedGame)}</span> : null}
                       {detail.release_year ? <span>{detail.release_year}</span> : null}
                       <span>{detail.has_igdb_link ? "Metadata linked" : "Manual entry"}</span>
                       <span className="archive-expiry-pill">{formatArchiveExpiry(detail.archived_at)}</span>
@@ -463,7 +574,13 @@ export default function ArchivePage({
                 <div className="archive-detail-grid">
                   <DetailBlock label="Playtime" value={formatDurationLong(detail.total_seconds || 0)} />
                   <DetailBlock label="Archived" value={formatArchivedDate(detail.archived_at)} />
-                  <DetailBlock label="Executable" value={detail.primary_exe_name || "Not stored"} />
+                  {getArchivedGameEmulatorProfileBadge(detail || selectedGame) ? (
+                    <DetailBlock label="Emulator" value={getArchivedGameEmulatorProfileBadge(detail || selectedGame)} />
+                  ) : null}
+                  <DetailBlock
+                    label={getArchivedGameStoreBadge(detail || selectedGame) === "Emulator" ? "ROM File" : "Executable"}
+                    value={detail.primary_exe_name || detail.rom_path || "Not stored"}
+                  />
                   <DetailBlock label="Age Rating" value={detail.age_rating?.label || "Unknown"} icon={<ShieldIcon />} />
                   <DetailBlock label="Developers" value={detail.developers?.length ? detail.developers.join(", ") : "Unknown"} icon={<UsersIcon />} />
                   <DetailBlock label="Publishers" value={detail.publishers?.length ? detail.publishers.join(", ") : "Unknown"} icon={<UsersIcon />} />
@@ -499,14 +616,24 @@ export default function ArchivePage({
                 <TrashIcon />
                 <span>{deletingArchiveId === selectedGame.archive_id ? "Deleting..." : "Delete Permanently"}</span>
               </button>
-              <button
-                type="button"
-                className="action-button action-button-primary"
-                disabled={restoringArchiveId === selectedGame.archive_id || deletingArchiveId === selectedGame.archive_id}
-                onClick={() => onRestore?.(selectedGame)}
-              >
-                {restoringArchiveId === selectedGame.archive_id ? "Restoring..." : "Restore"}
-              </button>
+              {String(detail?.emulator_name || detail?.emulator_profile_name || selectedGame?.emulator_name || selectedGame?.emulator_profile_name || "").toLowerCase().includes("rpcs3") ? (
+                <ArchiveRestoreDropdown
+                  game={selectedGame}
+                  isRestoring={restoringArchiveId === selectedGame.archive_id}
+                  disabled={deletingArchiveId === selectedGame.archive_id}
+                  onRestoreFile={(g) => onRestore?.(g, { mode: "file" })}
+                  onRestoreFolder={(g) => onRestore?.(g, { mode: "folder" })}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="action-button action-button-primary"
+                  disabled={restoringArchiveId === selectedGame.archive_id || deletingArchiveId === selectedGame.archive_id}
+                  onClick={() => onRestore?.(selectedGame)}
+                >
+                  {restoringArchiveId === selectedGame.archive_id ? "Restoring..." : "Restore"}
+                </button>
+              )}
             </div>
           </section>
         </div>

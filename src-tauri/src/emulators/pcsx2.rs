@@ -104,6 +104,5 @@ impl EmulatorHandler for Pcsx2Handler {
             .add_filter("IRX Executables", &["irx"])
             .add_filter("GS Dumps", &["gs", "xz", "zst"])
             .add_filter("Block Dumps", &["dump"])
-            .add_filter("All Files", &["*"])
     }
 }

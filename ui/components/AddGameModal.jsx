@@ -2,7 +2,7 @@ import React, { memo, startTransition, useEffect, useMemo, useRef, useState } fr
 import { CheckCircleIcon, ChevronDownIcon, CloseIcon, FolderIcon, InfoCircleIcon, RefreshIcon, SearchIcon, WarningTriangleIcon } from "./icons";
 import LoadingIndicator from "./LoadingIndicator";
 import { igdbCategoryLabel } from "../lib/igdb-game-type";
-import { formatDurationLong } from "../lib/game-helpers";
+import { formatDurationLong, validateRomFormat } from "../lib/game-helpers";
 import { invoke } from "../lib/tauri";
 import exeHelpMarkdown from "../../src/notes.md?raw";
 import exeHelpImage1 from "../../src/picture/image1.png";
@@ -449,6 +449,13 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
     if (isEmu) {
       if (!curRomPath || form?.emulatorId == null) {
         notifyMissingRequiredFields();
+        return;
+      }
+      const selectedProfile = (emulatorProfiles || []).find((p) => p?.id === form?.emulatorId);
+      const emuName = selectedProfile?.name || "";
+      const validationError = validateRomFormat(emuName, curRomPath);
+      if (validationError) {
+        notifyAddGameError(validationError);
         return;
       }
     } else if (!curExePath) {

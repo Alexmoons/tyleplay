@@ -535,6 +535,7 @@ export default function GameDetailPage({
     : undefined;
   const releaseYear = detail?.release_year || game?.release_year || "-";
   const storeLabel = formatGameStoreLabel(detail?.store ?? game?.store);
+  const emulatorLabel = detail?.emulator_name || detail?.emulator_profile_name || game?.emulator_name || game?.emulator_profile_name || "-";
   const hasExecutable = Boolean(detail?.executable_path || detail?.rom_path || game?.rom_path);
   const isFavorite = Boolean(game?.isFavorite ?? game?.is_favorite);
   const hasManualPlaytime = Boolean(detail?.has_manual_playtime);
@@ -759,6 +760,10 @@ export default function GameDetailPage({
     }
   }
 
+  if (loading || refreshing) {
+    return <GameDetailSkeleton />;
+  }
+
   return (
     <div className="game-detail-page w-full h-full flex flex-col bg-[#0f0f0f] text-gray-300 overflow-y-auto overflow-x-hidden relative custom-scrollbar pb-20">
 
@@ -802,7 +807,7 @@ export default function GameDetailPage({
                 />
               </div>
             ) : (
-              <h1 className="text-4xl lg:text-5xl font-black text-white tracking-tight pt-8 mb-3 drop-shadow-xl flex items-baseline gap-4 leading-none">
+              <h1 className="game-detail-hero-title text-4xl lg:text-5xl font-black text-white tracking-tight pt-8 mb-3 flex items-baseline gap-4 leading-none">
                 {game?.name || "Unknown game"}
               </h1>
             )}
@@ -849,7 +854,7 @@ export default function GameDetailPage({
                 <span className="text">Delete</span>
               </button>
               <button onClick={handleRefresh} disabled={refreshing || loading} className={`game-detail-action-button btn-refresh cursor-pointer`} title="Refresh Metadata">
-                <span className={`icon ${refreshing ? "animate-spin" : ""}`}><RefreshIcon /></span>
+                <span className="icon"><RefreshIcon className={refreshing ? "animate-spin" : ""} /></span>
                 <span className="text">{refreshing ? "Syncing..." : "Sync"}</span>
               </button>
               <button onClick={handleToggleFavorite} disabled={loading} className={`game-detail-action-button btn-favorite cursor-pointer ${isFavorite ? "is-favorite" : ""}`} title="Toggle Favorite">
@@ -881,7 +886,11 @@ export default function GameDetailPage({
               <DetailRow icon={<TagIcon className="text-purple-400" />} label="Type" value="Game" />
               <DetailRow icon={<CalendarIcon className="text-sky-400" />} label="Release Date" value={String(releaseYear)} />
               <DetailRow icon={<TagIcon className="text-emerald-400" />} label="Genre" value={genres.length ? genres.join(", ") : "-"} />
-              <DetailRow icon={<TagIcon className="text-amber-400" />} label="Store" value={storeLabel} />
+              {isEmulator ? (
+                <DetailRow icon={<GamepadOutlineIcon className="text-amber-400" />} label="Emulator" value={emulatorLabel} />
+              ) : (
+                <DetailRow icon={<TagIcon className="text-amber-400" />} label="Store" value={storeLabel} />
+              )}
               <DetailRow icon={<CalendarIcon className="text-indigo-400" />} label="Date Added" value={addedAtLabel || "-"} />
             </div>
             <div className="flex flex-col">
@@ -1652,5 +1661,95 @@ function GameDetailStatusDropdown({ currentStatus, hasPlaytime, onSelectStatus, 
     </div>
   );
 }
+
+function GameDetailSkeleton() {
+  return (
+    <div className="game-detail-page w-full h-full flex flex-col bg-[#0f0f0f] text-gray-300 overflow-y-auto overflow-x-hidden relative custom-scrollbar pb-20 select-none pointer-events-none">
+      {/* Top Floating Bar */}
+      <div className="absolute top-0 left-0 w-full pt-6 px-8 flex items-center gap-5 z-50">
+        <h1 className="text-3xl font-black text-white tracking-tight drop-shadow-xl">Game Details</h1>
+      </div>
+
+      {/* Hero Section Skeleton */}
+      <div className="relative w-full min-h-[380px] lg:min-h-[410px] flex-shrink-0 bg-[#141414] overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-t from-[#0f0f0f] via-[#0f0f0f]/30 to-transparent" />
+        <div className="absolute inset-y-0 left-0 w-1/2 bg-gradient-to-r from-[#0f0f0f]/75 via-[#0f0f0f]/25 to-transparent" />
+
+        <div className="absolute top-28 left-0 w-full px-8 flex items-start gap-8 z-20">
+          {/* Poster Skeleton */}
+          <div className="w-[185px] flex-shrink-0 rounded-xl overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.7)] border border-white/5 relative z-20 translate-y-8 bg-[#181818] aspect-[2/3] animate-pulse" />
+
+          {/* Info Skeleton */}
+          <div className="flex-1 z-20 space-y-4 pt-8 animate-pulse">
+            {/* Title */}
+            <div className="h-10 w-72 max-w-[60%] bg-[#222222] rounded-xl mb-3" />
+
+            {/* Genres */}
+            <div className="flex items-center gap-2 mb-3">
+              <div className="h-6 w-20 bg-[#1e1e1e] rounded-full" />
+              <div className="h-6 w-24 bg-[#1e1e1e] rounded-full" />
+              <div className="h-6 w-16 bg-[#1e1e1e] rounded-full" />
+            </div>
+
+            {/* About */}
+            <div className="space-y-2 max-w-3xl mb-5">
+              <div className="h-3 w-16 bg-[#1e1e1e] rounded mb-1.5" />
+              <div className="h-3.5 w-full bg-[#1c1c1c] rounded" />
+              <div className="h-3.5 w-5/6 bg-[#1c1c1c] rounded" />
+              <div className="h-3.5 w-2/3 bg-[#1c1c1c] rounded" />
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center gap-3 pt-2">
+              <div className="h-10 w-32 bg-[#252525] rounded-full" />
+              <div className="h-10 w-10 bg-[#1e1e1e] rounded-full" />
+              <div className="h-10 w-10 bg-[#1e1e1e] rounded-full" />
+              <div className="h-10 w-10 bg-[#1e1e1e] rounded-full" />
+              <div className="h-10 w-10 bg-[#1e1e1e] rounded-full" />
+              <div className="h-10 w-36 bg-[#1e1e1e] rounded-full" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Content Below Hero Skeleton */}
+      <div className="px-8 mt-8 z-10 space-y-12 animate-pulse">
+        {/* Information Section */}
+        <div className="flex flex-col">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-5 h-5 bg-[#1e1e1e] rounded" />
+            <div className="h-6 w-32 bg-[#222222] rounded-lg" />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-3 w-full">
+            {Array.from({ length: 10 }).map((_, idx) => (
+              <div key={idx} className="flex items-center justify-between py-2 border-b border-white/[0.04]">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-4 h-4 bg-[#1e1e1e] rounded" />
+                  <div className="h-4 w-24 bg-[#1e1e1e] rounded" />
+                </div>
+                <div className="h-4 w-32 bg-[#242424] rounded" />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Playtime Summary Cards Skeleton */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, idx) => (
+            <div key={idx} className="h-28 bg-[#161616] rounded-2xl p-5 flex flex-col justify-between border-0">
+              <div className="flex items-center justify-between">
+                <div className="h-4 w-20 bg-[#222222] rounded" />
+                <div className="w-5 h-5 bg-[#222222] rounded" />
+              </div>
+              <div className="h-7 w-28 bg-[#282828] rounded-lg" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 

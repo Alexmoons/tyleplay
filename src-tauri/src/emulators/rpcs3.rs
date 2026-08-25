@@ -129,7 +129,6 @@ impl EmulatorHandler for Rpcs3Handler {
     fn configure_file_dialog(&self, dialog: rfd::FileDialog) -> rfd::FileDialog {
         dialog
             .add_filter("Decrypted PS3 Disc Images (.iso)", &["iso"])
-            .add_filter("All Files (*.*)", &["*"])
     }
 }
 

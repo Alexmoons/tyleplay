@@ -13,6 +13,7 @@ import { MoreIcon, PencilIcon, PlayIcon, StarIcon, StatusIcon, TrashIcon } from 
 
 function GameCardMoreMenuPortal({ isOpen, buttonRef, onClose, onEdit, onDelete }) {
   const [coords, setCoords] = useState(null);
+  const panelRef = useRef(null);
 
   useEffect(() => {
     if (!isOpen || !buttonRef?.current) {
@@ -45,10 +46,39 @@ function GameCardMoreMenuPortal({ isOpen, buttonRef, onClose, onEdit, onDelete }
     };
   }, [isOpen, buttonRef]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    function handlePointerDown(event) {
+      if (
+        buttonRef?.current &&
+        !buttonRef.current.contains(event.target) &&
+        panelRef.current &&
+        !panelRef.current.contains(event.target)
+      ) {
+        onClose();
+      }
+    }
+
+    function handleEscape(event) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [isOpen, buttonRef, onClose]);
+
   if (!isOpen || !coords || typeof document === "undefined") return null;
 
   return createPortal(
     <div
+      ref={panelRef}
       className="fixed z-[99999] min-w-[132px] w-max p-1.5 rounded-[14px] bg-[#161616] border-0 shadow-2xl flex flex-col gap-1 pointer-events-auto"
       style={{
         left: `${coords.left}px`,
@@ -60,9 +90,10 @@ function GameCardMoreMenuPortal({ isOpen, buttonRef, onClose, onEdit, onDelete }
       <button
         type="button"
         role="menuitem"
-        className="game-card-menu-item"
+        className="game-card-menu-item cursor-pointer"
         onClick={(event) => {
           event.stopPropagation();
+          event.preventDefault();
           onClose();
           onEdit?.();
         }}
@@ -73,9 +104,10 @@ function GameCardMoreMenuPortal({ isOpen, buttonRef, onClose, onEdit, onDelete }
       <button
         type="button"
         role="menuitem"
-        className="game-card-menu-item is-danger"
+        className="game-card-menu-item is-danger cursor-pointer"
         onClick={async (event) => {
           event.stopPropagation();
+          event.preventDefault();
           onClose();
           await onDelete?.();
         }}
@@ -104,27 +136,6 @@ export default function LibraryGameCard({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const rootRef = useRef(null);
   const buttonRef = useRef(null);
-
-  useEffect(() => {
-    function handlePointerDown(event) {
-      if (!rootRef.current?.contains(event.target) && !buttonRef.current?.contains(event.target)) {
-        setIsMenuOpen(false);
-      }
-    }
-
-    function handleEscape(event) {
-      if (event.key === "Escape") {
-        setIsMenuOpen(false);
-      }
-    }
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, []);
 
   const isFavorite = Boolean(game?.isFavorite ?? game?.is_favorite);
 

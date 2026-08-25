@@ -122,7 +122,7 @@ impl EmulatorHandler for DuckstationHandler {
             .add_filter(
                 "Supported PS1 Images",
                 &[
-                    "cue", "chd", "iso", "bin", "img", "mdf", "pbp", "cso", "zso", "ecm", "exe",
+                    "cue", "chd", "iso", "bin", "img", "mdf", "pbp", "cso", "zso", "ecm",
                 ],
             )
             .add_filter("Cue Sheets (.cue)", &["cue"])
@@ -130,6 +130,5 @@ impl EmulatorHandler for DuckstationHandler {
             .add_filter("Raw Disc Images (.bin / .iso / .img)", &["iso", "bin", "img"])
             .add_filter("PSP / PS1 Eboot (.pbp)", &["pbp"])
             .add_filter("Media Descriptor (.mdf)", &["mdf"])
-            .add_filter("All Files", &["*"])
     }
 }

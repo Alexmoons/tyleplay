@@ -3755,6 +3755,10 @@ img {
   pointer-events: none;
 }
 
+.game-detail-hero-title {
+  text-shadow: 0 4px 18px rgba(0, 0, 0, 0.9), 0 2px 6px rgba(0, 0, 0, 0.95);
+}
+
 .game-detail-play-button:hover:not(:disabled) {
   background: linear-gradient(180deg, #7c6aff 0%, #6347e8 100%);
   border-color: #6347e8;
@@ -3816,6 +3820,13 @@ img {
   justify-content: center;
   flex-shrink: 0;
   transition: left 0.35s cubic-bezier(0.4, 0, 0.2, 1), transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.game-detail-action-button .icon svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  transform-origin: center center;
 }
 
 .game-detail-action-button .text {
