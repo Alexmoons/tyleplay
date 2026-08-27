@@ -1,6 +1,6 @@
 [package]
 name = "tyleplay"
-version = "2.3.7"
+version = "2.3.8-6"
 description = "TylePlay"
 authors = ["Alexmoons/Artyle"]
 license = "GPL-3.0-or-later"

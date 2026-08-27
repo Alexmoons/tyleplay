@@ -560,7 +560,7 @@ const mockEmulatorProfiles = [
     id: 6,
     name: "RPCS3 (PlayStation 3)",
     exe_path: "C:\\Emulators\\RPCS3\\rpcs3.exe",
-    default_args: "--no-gui",
+    default_args: "--no-gui --fullscreen",
     platform: "Sony PlayStation 3",
     created_at: mockNow - 86400 * 1,
     updated_at: mockNow - 86400 * 1,

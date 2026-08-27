@@ -642,15 +642,6 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
           <div>
             <strong id="add-game-title">Add Game</strong>
           </div>
-          <button
-            type="button"
-            className="add-game-close"
-            aria-label="Close add game"
-            onClick={() => !saving && onClose?.()}
-            disabled={saving}
-          >
-            <CloseIcon />
-          </button>
         </div>
 
         <form className="add-game-form" onSubmit={handleSubmit}>
@@ -701,50 +692,52 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
               }}
               onClick={() => updateField("gameType", "emulator")}
             >
-              Emulator ROM
+              Emulator Game
             </button>
           </div>
 
-          <label ref={autocompleteRef} className="edit-game-field add-game-autocomplete">
-            <span>Game Name *</span>
-            <div className="add-game-name-wrap">
-              <SearchIcon />
-              <input
-                onChange={(event) => {
-                  const nextValue = event.target.value;
-                  nameValueRef.current = nextValue;
-                  const nextHasName = nextValue.trim().length > 0;
-                  setHasName((current) => (current === nextHasName ? current : nextHasName));
-                  setSelectedIgdb(null);
-                  setHasSearched(false);
-                  if (!nextHasName) {
-                    setResults([]);
-                    setArchiveCandidates([]);
-                    setSelectedArchiveId(null);
-                    setArchiveChoiceOpen(false);
-                    setArchiveChoiceError("");
-                    setIsSuggestionOpen(false);
-                    setSearchQuery("");
-                  }
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    handleSearch();
-                  }
-                }}
-                onFocus={() => setIsSuggestionOpen(true)}
-                placeholder="Elden Ring"
-                autoComplete="off"
-                ref={nameInputRef}
-              />
+          <div ref={autocompleteRef} className="edit-game-field add-game-autocomplete">
+            <span className="edit-game-field-label">Game Name *</span>
+            <div className="edit-game-input-with-action">
+              <div className="add-game-name-wrap">
+                <SearchIcon />
+                <input
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    nameValueRef.current = nextValue;
+                    const nextHasName = nextValue.trim().length > 0;
+                    setHasName((current) => (current === nextHasName ? current : nextHasName));
+                    setSelectedIgdb(null);
+                    setHasSearched(false);
+                    if (!nextHasName) {
+                      setResults([]);
+                      setArchiveCandidates([]);
+                      setSelectedArchiveId(null);
+                      setArchiveChoiceOpen(false);
+                      setArchiveChoiceError("");
+                      setIsSuggestionOpen(false);
+                      setSearchQuery("");
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      handleSearch();
+                    }
+                  }}
+                  onFocus={() => setIsSuggestionOpen(true)}
+                  placeholder="Elden Ring"
+                  autoComplete="off"
+                  ref={nameInputRef}
+                />
+              </div>
               <button
                 type="button"
-                className="add-game-inline-search"
+                className="action-button action-button-primary add-game-search-button"
                 onClick={handleSearch}
                 disabled={!hasName || searching}
               >
-                {searching ? "Searching..." : "Search"}
+                <span>{searching ? "Searching..." : "Search"}</span>
               </button>
             </div>
             {showSuggestionPopup ? (
@@ -774,7 +767,7 @@ export default function AddGameModal({ open, onClose, onAdded, onNotify, onOpenA
             ) : hasName ? (
               <p className="add-game-selection-note">Manual mode is active. The game will be saved without metadata.</p>
             ) : null}
-          </label>
+          </div>
 
           {isEmulator ? (
             <>

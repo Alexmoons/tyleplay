@@ -46,7 +46,7 @@ const EMULATOR_PRESETS = [
   {
     name: "RPCS3",
     platform: "PlayStation 3",
-    defaultArgs: "--no-gui",
+    defaultArgs: "--no-gui --fullscreen",
     hint: "Sony PlayStation 3",
   },
 ];
@@ -64,6 +64,8 @@ export default function EmulatorsSettingsTab({ onNotify }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pickingExe, setPickingExe] = useState(false);
+  const [profileToDelete, setProfileToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     loadProfiles();
@@ -187,18 +189,17 @@ export default function EmulatorsSettingsTab({ onNotify }) {
     }
   }
 
-  async function handleDelete(profile) {
-    if (!window.confirm(`Are you sure you want to delete emulator "${profile.name}"?`)) {
-      return;
-    }
-
+  async function handleConfirmDelete() {
+    if (!profileToDelete) return;
+    setDeleting(true);
     try {
-      await invoke("delete_emulator_profile", { id: profile.id });
+      await invoke("delete_emulator_profile", { id: profileToDelete.id });
       onNotify?.({
         tone: "success",
         title: "Emulator removed",
-        message: `Removed ${profile.name}.`,
+        message: `Removed ${profileToDelete.name}.`,
       });
+      setProfileToDelete(null);
       await loadProfiles();
     } catch (err) {
       onNotify?.({
@@ -206,6 +207,8 @@ export default function EmulatorsSettingsTab({ onNotify }) {
         title: "Failed to delete emulator",
         message: err?.message || String(err),
       });
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -269,7 +272,7 @@ export default function EmulatorsSettingsTab({ onNotify }) {
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleDelete(profile)}
+                        onClick={() => setProfileToDelete(profile)}
                         className="action-button action-button-secondary"
                         style={{ padding: "0.4rem", minHeight: "auto", borderRadius: "9999px", color: "#f87171" }}
                         title="Delete profile"
@@ -445,7 +448,7 @@ export default function EmulatorsSettingsTab({ onNotify }) {
               <div className="confirm-modal-actions" style={{ marginTop: "0.5rem" }}>
                 <button
                   type="button"
-                  className="action-button action-button-secondary"
+                  className="action-button action-button-browse"
                   onClick={() => setIsModalOpen(false)}
                   disabled={saving}
                 >
@@ -460,6 +463,49 @@ export default function EmulatorsSettingsTab({ onNotify }) {
                 </button>
               </div>
             </form>
+          </section>
+        </div>
+      )}
+
+      {/* Modal Dialog for Delete Confirmation */}
+      {profileToDelete && (
+        <div
+          className="confirm-modal-overlay"
+          role="presentation"
+          onClick={() => !deleting && setProfileToDelete(null)}
+        >
+          <section
+            className="confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-emulator-title"
+            onClick={(event) => event.stopPropagation()}
+            style={{ maxWidth: "420px", width: "100%" }}
+          >
+            <div className="confirm-modal-head">
+              <strong id="delete-emulator-title">Delete Emulator Profile</strong>
+            </div>
+            <p>
+              Are you sure you want to delete emulator profile <strong>"{profileToDelete.name}"</strong>? Games configured with this profile will no longer have a linked emulator.
+            </p>
+            <div className="confirm-modal-actions">
+              <button
+                type="button"
+                className="action-button action-button-browse"
+                onClick={() => setProfileToDelete(null)}
+                disabled={deleting}
+              >
+                <span>Cancel</span>
+              </button>
+              <button
+                type="button"
+                className="action-button action-button-danger"
+                onClick={handleConfirmDelete}
+                disabled={deleting}
+              >
+                <span>{deleting ? "Deleting..." : "Delete Profile"}</span>
+              </button>
+            </div>
           </section>
         </div>
       )}

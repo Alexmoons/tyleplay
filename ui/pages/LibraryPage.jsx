@@ -311,11 +311,11 @@ function CategorySelect({ storeTabs, activeTab, onSelectCategory }) {
     { value: "installed", label: "Installed Games" },
     { value: "favorites", label: "Favorites" },
     { value: "unplayed", label: "Unplayed Games" },
-    { value: "status:Backlog", label: "Backlog / Not Started" },
-    { value: "status:In Progress", label: "In Progress / Playing" },
-    { value: "status:Completed", label: "Completed / Beaten" },
+    { value: "status:Backlog", label: "Backlog" },
+    { value: "status:In Progress", label: "In Progress" },
+    { value: "status:Completed", label: "Completed" },
     { value: "status:100% Mastered", label: "100% Mastered" },
-    { value: "status:Dropped", label: "Dropped / Abandoned" },
+    { value: "status:Dropped", label: "Dropped" },
     ...storeTabs.map((tab) => ({ value: tab.id, label: tab.label, count: tab.count })),
   ];
 

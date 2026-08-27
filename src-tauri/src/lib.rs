@@ -3520,6 +3520,107 @@ fn restore_archived_game(
     let tx = main_conn
         .unchecked_transaction()
         .map_err(|err| err.to_string())?;
+
+    let (final_emulator_id, final_emulator_profile_name) = if is_emulator {
+        let target_emu_name = archived
+            .record
+            .emulator_profile_name
+            .as_deref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| {
+                let platforms = archived
+                    .record
+                    .platforms_json
+                    .as_deref()
+                    .unwrap_or_default()
+                    .to_lowercase();
+                let p = archived
+                    .primary_exe_name
+                    .as_deref()
+                    .unwrap_or_default()
+                    .to_lowercase();
+                let ext = Path::new(exe_path)
+                    .extension()
+                    .and_then(|v| v.to_str())
+                    .unwrap_or_default()
+                    .to_lowercase();
+                if platforms.contains("playstation 3")
+                    || platforms.contains("ps3")
+                    || p.ends_with(".pkg")
+                    || p.contains("eboot.bin")
+                    || ext == "pkg"
+                {
+                    "RPCS3"
+                } else if platforms.contains("playstation 2") || platforms.contains("ps2") {
+                    "PCSX2"
+                } else if platforms.contains("playstation portable")
+                    || platforms.contains("psp")
+                    || p.ends_with(".cso")
+                    || p.ends_with(".pbp")
+                    || ext == "cso"
+                    || ext == "pbp"
+                {
+                    "PPSSPP"
+                } else if platforms.contains("playstation") {
+                    "DuckStation"
+                } else {
+                    ""
+                }
+            });
+
+        let mut matched: Option<(i64, String)> = None;
+
+        if !target_emu_name.is_empty() {
+            matched = tx
+                .query_row(
+                    "SELECT id, name FROM emulator_profiles WHERE LOWER(name) = LOWER(?1) ORDER BY id DESC LIMIT 1",
+                    params![target_emu_name],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(|err| err.to_string())?;
+
+            if matched.is_none() {
+                let pattern = format!("%{}%", target_emu_name.to_lowercase());
+                matched = tx
+                    .query_row(
+                        "SELECT id, name FROM emulator_profiles WHERE LOWER(name) LIKE ?1 OR ?2 LIKE ('%' || LOWER(name) || '%') ORDER BY id DESC LIMIT 1",
+                        params![pattern, target_emu_name.to_lowercase()],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()
+                    .map_err(|err| err.to_string())?;
+            }
+        }
+
+        if matched.is_none() {
+            if let Some(old_id) = archived.record.emulator_id {
+                matched = tx
+                    .query_row(
+                        "SELECT id, name FROM emulator_profiles WHERE id = ?1 LIMIT 1",
+                        params![old_id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()
+                    .map_err(|err| err.to_string())?;
+            }
+        }
+
+        if let Some((profile_id, profile_name)) = matched {
+            (Some(profile_id), Some(profile_name))
+        } else {
+            let fallback_name = if !target_emu_name.is_empty() {
+                Some(target_emu_name.to_string())
+            } else {
+                archived.record.emulator_profile_name
+            };
+            (archived.record.emulator_id, fallback_name)
+        }
+    } else {
+        (None, None)
+    };
+
     tx.execute(
     "
     INSERT INTO games (
@@ -3572,8 +3673,8 @@ fn restore_archived_game(
       archived.record.completion_status,
       game_type,
       rom_path,
-      archived.record.emulator_id,
-      archived.record.emulator_profile_name
+      final_emulator_id,
+      final_emulator_profile_name
     ],
   )
   .map_err(|err| err.to_string())?;

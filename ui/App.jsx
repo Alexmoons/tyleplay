@@ -1366,7 +1366,6 @@ function App() {
         messageStrong: String(result?.game_name || game.name || "The game"),
         messageText: " was restored to your library.",
       });
-      setActiveView("library");
     } catch (nextError) {
       notifyAppError("Unable to restore archived game.", nextError);
     } finally {

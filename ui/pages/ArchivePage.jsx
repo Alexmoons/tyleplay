@@ -627,7 +627,7 @@ export default function ArchivePage({
               ) : (
                 <button
                   type="button"
-                  className="action-button action-button-primary"
+                  className="action-button action-button-primary archive-restore-button"
                   disabled={restoringArchiveId === selectedGame.archive_id || deletingArchiveId === selectedGame.archive_id}
                   onClick={() => onRestore?.(selectedGame)}
                 >

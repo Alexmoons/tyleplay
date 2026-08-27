@@ -114,6 +114,7 @@ impl EmulatorHandler for Rpcs3Handler {
 
         if template.is_empty() {
             cmd.arg("--no-gui");
+            cmd.arg("--fullscreen");
             cmd.arg(&actual_target);
         } else if template.contains("{rom_path}") {
             let replaced = template.replace("{rom_path}", &actual_target);
