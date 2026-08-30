@@ -1,5 +1,4 @@
 pub mod duckstation;
-pub mod epsxe;
 pub mod pcsx2;
 pub mod ppsspp;
 pub mod rpcs3;
@@ -24,7 +23,7 @@ pub struct EmuGameInfo<'a> {
 }
 
 pub trait EmulatorHandler: Send + Sync {
-    /// Identifier name of the emulator (e.g. "PCSX2", "DuckStation", "ePSXe", "PPSSPP", "RPCS3")
+    /// Identifier name of the emulator (e.g. "PCSX2", "DuckStation", "PPSSPP", "RPCS3", "Yuzu")
     fn name(&self) -> &'static str;
 
     /// Checks if a running process executable or emulator profile matches this handler
@@ -47,7 +46,6 @@ pub fn get_all_handlers() -> &'static [&'static dyn EmulatorHandler] {
     &[
         &pcsx2::Pcsx2Handler,
         &duckstation::DuckstationHandler,
-        &epsxe::EpsxeHandler,
         &ppsspp::PpssppHandler,
         &rpcs3::Rpcs3Handler,
         &yuzu::YuzuHandler,
@@ -178,10 +176,10 @@ pub fn validate_rom_for_emulator(emu_name: &str, rom_path: &str) -> Result<(), S
         return Ok(());
     }
 
-    if lower_emu.contains("duckstation") || lower_emu.contains("epsxe") || lower_emu.contains("playstation 1") || lower_emu.contains("ps1") || lower_emu.contains("psx") {
+    if lower_emu.contains("duckstation") || lower_emu.contains("playstation 1") || lower_emu.contains("ps1") || lower_emu.contains("psx") {
         let valid = ["cue", "chd", "iso", "bin", "img", "mdf", "pbp", "cso", "zso", "ecm"];
         if !valid.contains(&ext.as_str()) {
-            return Err(format!("Invalid ROM format for {}. Supported formats: .cue, .chd, .iso, .bin, .img, .mdf, .pbp, .cso, .zso, .ecm.", if emu_name.trim().is_empty() { "PS1 emulator" } else { emu_name.trim() }));
+            return Err(format!("Invalid ROM format for {}. Supported formats: .cue, .chd, .iso, .bin, .img, .mdf, .pbp, .cso, .zso, .ecm.", if emu_name.trim().is_empty() { "DuckStation" } else { emu_name.trim() }));
         }
         return Ok(());
     }

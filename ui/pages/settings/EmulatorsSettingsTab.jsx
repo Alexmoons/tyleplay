@@ -32,12 +32,6 @@ const EMULATOR_PRESETS = [
     hint: "Sony PlayStation 1",
   },
   {
-    name: "ePSXe",
-    platform: "PlayStation 1",
-    defaultArgs: "-nogui -loadbin",
-    hint: "Sony PlayStation 1",
-  },
-  {
     name: "PPSSPP",
     platform: "PlayStation Portable",
     defaultArgs: "--fullscreen --pause-menu-exit",

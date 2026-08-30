@@ -6298,7 +6298,6 @@ fn pick_archived_game_rom_path(
             || all_text.contains("ps1")
             || all_text.contains("psx")
             || all_text.contains("duckstation")
-            || all_text.contains("epsxe")
         {
             emu_name = "DuckStation".to_string();
         } else {

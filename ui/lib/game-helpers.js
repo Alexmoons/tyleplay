@@ -577,10 +577,10 @@ export function validateRomFormat(emuName, path) {
     return null;
   }
 
-  if (lowerName.includes("duckstation") || lowerName.includes("epsxe") || lowerName.includes("playstation 1") || lowerName.includes("ps1") || lowerName.includes("psx")) {
+  if (lowerName.includes("duckstation") || lowerName.includes("playstation 1") || lowerName.includes("ps1") || lowerName.includes("psx")) {
     const ps1Exts = ["cue", "chd", "iso", "bin", "img", "mdf", "pbp", "cso", "zso", "ecm"];
     if (!ps1Exts.includes(ext)) {
-      return `Invalid ROM format for ${emuName || "PS1 emulator"}. Supported formats: .cue, .chd, .iso, .bin, .img, .mdf, .pbp, .cso, .zso, .ecm.`;
+      return `Invalid ROM format for ${emuName || "DuckStation"}. Supported formats: .cue, .chd, .iso, .bin, .img, .mdf, .pbp, .cso, .zso, .ecm.`;
     }
     return null;
   }
