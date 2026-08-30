@@ -3,6 +3,8 @@ pub mod epsxe;
 pub mod pcsx2;
 pub mod ppsspp;
 pub mod rpcs3;
+pub mod yuzu;
+
 
 use std::process::Command;
 
@@ -48,6 +50,7 @@ pub fn get_all_handlers() -> &'static [&'static dyn EmulatorHandler] {
         &epsxe::EpsxeHandler,
         &ppsspp::PpssppHandler,
         &rpcs3::Rpcs3Handler,
+        &yuzu::YuzuHandler,
     ]
 }
 
@@ -187,6 +190,19 @@ pub fn validate_rom_for_emulator(emu_name: &str, rom_path: &str) -> Result<(), S
         let valid = ["iso", "cso", "chd", "pbp", "elf", "prx", "zip"];
         if !valid.contains(&ext.as_str()) {
             return Err("Invalid ROM format for PPSSPP. Supported formats: .iso, .cso, .chd, .pbp, .elf, .prx, .zip.".to_string());
+        }
+        return Ok(());
+    }
+
+    if lower_emu.contains("yuzu") || lower_emu.contains("switch") || lower_emu.contains("nintendo switch") {
+        let valid = ["nso", "nro", "nca", "xci", "nsp", "kip", "main", "pfs0", "zip", "7z"];
+        let file_stem_or_name = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if !valid.contains(&ext.as_str()) && file_stem_or_name != "main" {
+            return Err("Invalid ROM format for Yuzu. Supported formats: .nso, .nro, .nca, .xci, .nsp, .kip, main, .pfs0, .zip, .7z.".to_string());
         }
         return Ok(());
     }

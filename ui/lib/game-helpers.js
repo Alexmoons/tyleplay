@@ -593,6 +593,15 @@ export function validateRomFormat(emuName, path) {
     return null;
   }
 
+  if (lowerName.includes("yuzu") || lowerName.includes("switch") || lowerName.includes("nintendo switch")) {
+    const switchExts = ["nso", "nro", "nca", "xci", "nsp", "kip", "main", "pfs0", "zip", "7z"];
+    const fileName = (cleanPath || "").split(/[\\/]/).pop()?.toLowerCase() || "";
+    if (!switchExts.includes(ext) && fileName !== "main") {
+      return "Invalid ROM format for Yuzu. Supported formats: .nso, .nro, .nca, .xci, .nsp, .kip, main, .pfs0, .zip, .7z.";
+    }
+    return null;
+  }
+
   const invalidExts = ["exe", "dll", "msi", "bat", "cmd", "ps1", "vbs", "sys", "com"];
   if (invalidExts.includes(ext)) {
     return `Invalid file format (.${ext}) for ${emuName || "emulator"}. Please select a valid game ROM file.`;

@@ -564,6 +564,15 @@ const mockEmulatorProfiles = [
     platform: "Sony PlayStation 3",
     created_at: mockNow - 86400 * 1,
     updated_at: mockNow - 86400 * 1,
+  },
+  {
+    id: 7,
+    name: "Yuzu (Nintendo Switch)",
+    exe_path: "C:\\Emulators\\Yuzu\\yuzu.exe",
+    default_args: "-f -g",
+    platform: "Nintendo Switch",
+    created_at: mockNow - 86400 * 1,
+    updated_at: mockNow - 86400 * 1,
   }
 ];
 

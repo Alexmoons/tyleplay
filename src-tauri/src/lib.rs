@@ -2298,7 +2298,7 @@ fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
     );
     // Clean up any emulator binaries or emulator games accidentally inserted into executables table
     let _ = conn.execute(
-        "DELETE FROM executables WHERE LOWER(exe_name) IN ('rpcs3.exe', 'pcsx2.exe', 'pcsx2-qtx64.exe', 'duckstation-qt-x64-release-ltcg.exe', 'duckstation-nogui-x64-release-ltcg.exe', 'ppssppwindows64.exe', 'ppssppwindows.exe', 'epsxe.exe') OR game_id IN (SELECT id FROM games WHERE game_type = 'emulator')",
+        "DELETE FROM executables WHERE LOWER(exe_name) IN ('rpcs3.exe', 'pcsx2.exe', 'pcsx2-qtx64.exe', 'duckstation-qt-x64-release-ltcg.exe', 'duckstation-nogui-x64-release-ltcg.exe', 'ppssppwindows64.exe', 'ppssppwindows.exe', 'epsxe.exe', 'yuzu.exe', 'yuzu-cmd.exe') OR game_id IN (SELECT id FROM games WHERE game_type = 'emulator')",
         [],
     );
     // Backfill emulator_profile_name for PSP games that were orphaned
@@ -3562,6 +3562,14 @@ fn restore_archived_game(
                     || ext == "pbp"
                 {
                     "PPSSPP"
+                } else if platforms.contains("switch")
+                    || platforms.contains("nintendo switch")
+                    || p.ends_with(".nsp")
+                    || p.ends_with(".xci")
+                    || ext == "nsp"
+                    || ext == "xci"
+                {
+                    "Yuzu"
                 } else if platforms.contains("playstation") {
                     "DuckStation"
                 } else {
@@ -6279,6 +6287,13 @@ fn pick_archived_game_rom_path(
             || all_text.contains("ppsspp")
         {
             emu_name = "PPSSPP".to_string();
+        } else if all_text.contains("nintendo switch")
+            || all_text.contains("switch")
+            || all_text.contains(".nsp")
+            || all_text.contains(".xci")
+            || all_text.contains("yuzu")
+        {
+            emu_name = "Yuzu".to_string();
         } else if all_text.contains("playstation")
             || all_text.contains("ps1")
             || all_text.contains("psx")
@@ -6588,6 +6603,12 @@ fn restore_archived_game_entry(
                     || p.ends_with(".pbp")
                 {
                     "PPSSPP"
+                } else if platforms.contains("switch")
+                    || platforms.contains("nintendo switch")
+                    || p.ends_with(".nsp")
+                    || p.ends_with(".xci")
+                {
+                    "Yuzu"
                 } else if platforms.contains("playstation") {
                     "DuckStation"
                 } else {

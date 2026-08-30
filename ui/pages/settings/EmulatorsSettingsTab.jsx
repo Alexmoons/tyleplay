@@ -49,6 +49,12 @@ const EMULATOR_PRESETS = [
     defaultArgs: "--no-gui --fullscreen",
     hint: "Sony PlayStation 3",
   },
+  {
+    name: "Yuzu",
+    platform: "Nintendo Switch",
+    defaultArgs: "-f -g",
+    hint: "Nintendo Switch",
+  },
 ];
 
 export default function EmulatorsSettingsTab({ onNotify }) {
