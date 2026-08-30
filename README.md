@@ -78,6 +78,18 @@ Database Location: ```%APPDATA%\com.artyle.tyleplay```
 </table>
 
 ---
+**v2.3.8-7 (2026-08-30)**
+- [x] Added Emulator Support.
+  - DuckStation, tested on v0.1-11752
+  - PCSX2, tested on v2.6.3
+  - RPCS3, tested on v0.0.40-19032-bc0c42b0 Alpha
+  - PPSSPP, tested on v1.7.4
+  - Yuzu, tested on v1730
+- [x] Fixed Edit and Delete buttons not working on the Library page.
+- [x] Fixed loading behavior when syncing game details on the Game Details page.
+- [x] Fixed an issue preventing emulator game information from being saved.
+- [x] Improved the Archive and Restore game process.
+
 **v2.3.7 (2026-08-18)**
 - [x] Added Database Export & Import functionality.
 - [x] Added toast notifications when a game starts or ends.
