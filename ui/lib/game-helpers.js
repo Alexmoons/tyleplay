@@ -17,8 +17,8 @@ export const libraryTabs = [
 ];
 
 export const viewModes = [
-  { id: "poster", label: "Poster grid", icon: "grid" },
-  { id: "compact", label: "Compact grid", icon: "layout-grid" },
+  { id: "poster", label: "Poster only", icon: "grid" },
+  { id: "compact", label: "Full info", icon: "layout-grid" },
   { id: "list", label: "Row layout", icon: "rows" },
 ];
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import SummaryCard from "../components/SummaryCard";
+import LoadingIndicator from "../components/LoadingIndicator";
 import {
   extractSteamAppId,
   formatDurationLong,
@@ -47,24 +48,28 @@ export default function StatsPage({
   loading,
   topGameArtwork = "poster",
   initialStatsSnapshot = null,
+  onStatsSnapshotLoaded = null,
   onOpenPlaytimeDetail,
   onOpenDailyPlaytime,
   onOpenWeeklyPlaytime,
   onNotify,
 }) {
+  const hasInitialSnapshot = Boolean(
+    initialStatsSnapshot &&
+    typeof initialStatsSnapshot === "object" &&
+    Array.isArray(initialStatsSnapshot.games) &&
+    initialStatsSnapshot.games.length > 0
+  );
   const [statsSnapshot, setStatsSnapshot] = useState(() => (
-    initialStatsSnapshot && typeof initialStatsSnapshot === "object"
-      ? { games: Array.isArray(initialStatsSnapshot.games) ? initialStatsSnapshot.games : [] }
+    hasInitialSnapshot
+      ? { games: initialStatsSnapshot.games }
       : { games: [] }
   ));
-  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsLoading, setDetailsLoading] = useState(() => !hasInitialSnapshot);
   const [chartMode, setChartMode] = useState("year");
   const [selectedPeriod, setSelectedPeriod] = useState("");
   const [selectedHeatmapWeek, setSelectedHeatmapWeek] = useState("");
   const [steamCapsuleMap, setSteamCapsuleMap] = useState(() => ({ ...steamCapsuleCache }));
-  const hasConsumedInitialSnapshotRef = useRef(
-    Boolean(initialStatsSnapshot && Array.isArray(initialStatsSnapshot.games) && initialStatsSnapshot.games.length)
-  );
 
   function notifyStats(notice) {
     onNotify?.(notice);
@@ -79,6 +84,12 @@ export default function StatsPage({
   }
 
   useEffect(() => {
+    if (initialStatsSnapshot && typeof initialStatsSnapshot === "object" && Array.isArray(initialStatsSnapshot.games)) {
+      setStatsSnapshot({ games: initialStatsSnapshot.games });
+    }
+  }, [initialStatsSnapshot]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadDetails() {
@@ -87,19 +98,18 @@ export default function StatsPage({
         return;
       }
 
-      if (hasConsumedInitialSnapshotRef.current) {
-        hasConsumedInitialSnapshotRef.current = false;
-        return;
-      }
-
       setDetailsLoading(true);
 
       try {
         const result = await invoke("get_stats_snapshot");
         if (!cancelled) {
-          setStatsSnapshot({
+          const snapshotData = {
             games: Array.isArray(result?.games) ? result.games : [],
+          };
+          React.startTransition(() => {
+            setStatsSnapshot(snapshotData);
           });
+          onStatsSnapshotLoaded?.(snapshotData);
         }
       } catch (error) {
         if (!cancelled) {
@@ -277,15 +287,20 @@ export default function StatsPage({
   );
   const combinedLoading = loading || detailsLoading;
 
-  useEffect(() => {
-    if (topGameArtwork !== "capsule") {
-      return undefined;
-    }
-
+  const topGamesSteamAppIdsKey = useMemo(() => {
     const appIds = [...topGames, ...todayTopGames, ...weekTopGames]
       .map((game) => Number(game.steamAppId || 0))
       .filter((appid) => appid > 0);
-    const missingAppIds = [...new Set(appIds)].filter((appid) => !steamCapsuleMap[appid]);
+    return [...new Set(appIds)].sort((a, b) => a - b).join(",");
+  }, [topGames, todayTopGames, weekTopGames]);
+
+  useEffect(() => {
+    if (topGameArtwork !== "capsule" || !topGamesSteamAppIdsKey) {
+      return undefined;
+    }
+
+    const appIds = topGamesSteamAppIdsKey.split(",").map(Number).filter((id) => id > 0);
+    const missingAppIds = [...new Set(appIds)].filter((appid) => !(appid in steamCapsuleCache));
 
     if (!missingAppIds.length) {
       return undefined;
@@ -296,23 +311,30 @@ export default function StatsPage({
     async function loadSteamCapsules() {
       try {
         const response = await invoke("get_steam_small_capsules", { appIds: missingAppIds });
-        if (cancelled || !response || typeof response !== "object") {
-          return;
-        }
+        const resolved = {};
+        missingAppIds.forEach((id) => {
+          const url = (response && typeof response === "object" && response[id]) ? response[id] : "";
+          steamCapsuleCache[id] = url;
+          resolved[id] = url;
+        });
 
-        Object.assign(steamCapsuleCache, response);
+        if (cancelled) return;
         setSteamCapsuleMap((current) => ({
           ...current,
-          ...response,
+          ...resolved,
         }));
-      } catch {}
+      } catch {
+        missingAppIds.forEach((id) => {
+          steamCapsuleCache[id] = "";
+        });
+      }
     }
 
     loadSteamCapsules();
     return () => {
       cancelled = true;
     };
-  }, [steamCapsuleMap, todayTopGames, topGameArtwork, topGames, weekTopGames]);
+  }, [topGameArtwork, topGamesSteamAppIdsKey]);
 
   return (
     <div className="stats-page">
@@ -322,122 +344,140 @@ export default function StatsPage({
         </div>
       </header>
 
-      <section className="library-stat-grid">
-        {summaryCards.map((card) => (
-          <SummaryCard key={card.id} {...card} loading={combinedLoading} />
-        ))}
-      </section>
+      {combinedLoading ? (
+        <div className="stats-page-loading-wrapper">
+          <LoadingIndicator className="stats-loading-block" label="Loading stats..." />
+        </div>
+      ) : (
+        <>
+          <section className="library-stat-grid">
+            {summaryCards.map((card) => (
+              <SummaryCard key={card.id} {...card} />
+            ))}
+          </section>
 
-      <hr className="stats-section-divider" aria-hidden="true" />
+          <hr className="stats-section-divider" aria-hidden="true" />
 
-      <section className="stats-main-grid">
-        <article className="stats-panel stats-chart-panel">
-          <div className="stats-panel-head">
-            <strong>Playtime Over Time</strong>
-            <div className="stats-chart-controls">
-              <StatsDropdown
-                options={CHART_MODE_OPTIONS}
-                value={chartMode}
-                onChange={setChartMode}
-                ariaLabel="Select chart granularity"
-              />
-              <StatsPeriodPicker
-                mode={chartMode}
-                options={periodOptions}
-                value={selectedPeriod}
-                onChange={setSelectedPeriod}
-                ariaLabel="Select chart period"
-              />
-            </div>
-          </div>
-          <StatsLineChart
-            data={chartData}
-            loading={combinedLoading}
-            mode={chartMode}
-            emptyLabel={selectedPeriodLabel || chartMode}
-          />
-        </article>
-
-        <article className="stats-panel stats-donut-panel">
-          <div className="stats-panel-head">
-            <strong>Playtime by Store</strong>
-          </div>
-          <div className="stats-donut-layout">
-            <StatsDonutChart items={storeBreakdown} totalSeconds={totalPlaytimeSeconds} loading={combinedLoading} />
-            <div className="stats-donut-legend">
-              {storeBreakdown.map((item) => (
-                <div key={item.label} className="stats-donut-legend-row">
-                  <div className="stats-donut-legend-main">
-                    <i style={{ background: item.color }} aria-hidden="true" />
-                    <span>{item.label}</span>
-                  </div>
-                  <span>{formatStorePercent(item.percent, item.totalSeconds)}</span>
-                  <strong>{formatDurationLong(item.totalSeconds)}</strong>
+          <section className="stats-main-grid">
+            <article className="stats-panel stats-chart-panel">
+              <div className="stats-panel-head">
+                <strong>Over Time</strong>
+                <div className="stats-chart-controls">
+                  <StatsDropdown
+                    options={CHART_MODE_OPTIONS}
+                    value={chartMode}
+                    onChange={setChartMode}
+                    ariaLabel="Select chart granularity"
+                  />
+                  <StatsPeriodPicker
+                    mode={chartMode}
+                    options={periodOptions}
+                    value={selectedPeriod}
+                    onChange={setSelectedPeriod}
+                    ariaLabel="Select chart period"
+                  />
                 </div>
-              ))}
-            </div>
-          </div>
-        </article>
-      </section>
+              </div>
+              <StatsLineChart
+                data={chartData}
+                mode={chartMode}
+                emptyLabel={selectedPeriodLabel || chartMode}
+              />
+            </article>
 
-      <section className="stats-bottom-grid">
-        <article className="stats-panel stats-topgames-panel">
-          <div className="stats-panel-head">
-            <strong>Most Played Games</strong>
-            <button type="button" className="stats-panel-link" onClick={onOpenPlaytimeDetail}>
-              View all
-            </button>
-          </div>
-          <div className="stats-topgames-list">
-            {renderTopGameRows(topGames, "all", { artwork: topGameArtwork, steamCapsuleMap })}
-          </div>
-        </article>
+            <article className="stats-panel stats-donut-panel">
+              <div className="stats-panel-head">
+                <strong>By Store</strong>
+              </div>
+              <div className="stats-donut-layout">
+                <StatsDonutChart items={storeBreakdown} totalSeconds={totalPlaytimeSeconds} />
+                <div className="stats-donut-legend">
+                  {storeBreakdown.map((item) => (
+                    <div key={item.label} className="stats-donut-legend-row">
+                      <div className="stats-donut-legend-main">
+                        <i style={{ background: item.color }} aria-hidden="true" />
+                        <span>{item.label}</span>
+                      </div>
+                      <span>{formatStorePercent(item.percent, item.totalSeconds)}</span>
+                      <strong>{formatDurationLong(item.totalSeconds)}</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </article>
+          </section>
 
-        <article className="stats-panel stats-heatmap-panel">
-          <div className="stats-panel-head">
-            <strong>Playtime Heatmap</strong>
-            <StatsPeriodPicker
-              mode="week"
-              options={heatmapWeekOptions}
-              value={selectedHeatmapWeek}
-              onChange={setSelectedHeatmapWeek}
-              ariaLabel="Select heatmap week"
-            />
-          </div>
-          <StatsHeatmap data={heatmapData} loading={combinedLoading} />
-        </article>
-      </section>
+          <section className="stats-bottom-grid">
+            <article className="stats-panel stats-topgames-panel">
+              <div className="stats-panel-head">
+                <strong>Most Played Games</strong>
+                <button type="button" className="stats-panel-link" onClick={onOpenPlaytimeDetail}>
+                  View all
+                </button>
+              </div>
+              <div className="stats-topgames-list">
+                {renderTopGameRows(topGames, "all", {
+                  artwork: topGameArtwork,
+                  steamCapsuleMap,
+                })}
+              </div>
+            </article>
 
-      <section className="stats-extra-grid">
-        <article className="stats-panel stats-topgames-panel">
-          <div className="stats-panel-head">
-            <strong>Today's Playtime</strong>
-            <button type="button" className="stats-panel-link" onClick={onOpenDailyPlaytime}>
-              View all
-            </button>
-          </div>
-          <div className="stats-topgames-list">
-            {renderTopGameRows(todayTopGames, "today", { showEmptyPlaceholders: true, artwork: topGameArtwork, steamCapsuleMap })}
-          </div>
-        </article>
+            <article className="stats-panel stats-heatmap-panel">
+              <div className="stats-panel-head">
+                <strong>Heatmap</strong>
+                <StatsPeriodPicker
+                  mode="week"
+                  options={heatmapWeekOptions}
+                  value={selectedHeatmapWeek}
+                  onChange={setSelectedHeatmapWeek}
+                  ariaLabel="Select heatmap week"
+                />
+              </div>
+              <StatsHeatmap data={heatmapData} />
+            </article>
+          </section>
 
-        <article className="stats-panel stats-topgames-panel">
-          <div className="stats-panel-head">
-            <strong>This Week's Playtime</strong>
-            <button type="button" className="stats-panel-link" onClick={onOpenWeeklyPlaytime}>
-              View all
-            </button>
-          </div>
-          <div className="stats-topgames-list">
-            {renderTopGameRows(weekTopGames, "week", { showEmptyPlaceholders: true, artwork: topGameArtwork, steamCapsuleMap })}
-          </div>
-        </article>
-      </section>
+          <section className="stats-extra-grid">
+            <article className="stats-panel stats-topgames-panel">
+              <div className="stats-panel-head">
+                <strong>Today</strong>
+                <button type="button" className="stats-panel-link" onClick={onOpenDailyPlaytime}>
+                  View all
+                </button>
+              </div>
+              <div className="stats-topgames-list">
+                {renderTopGameRows(todayTopGames, "today", {
+                  showEmptyPlaceholders: true,
+                  artwork: topGameArtwork,
+                  steamCapsuleMap,
+                })}
+              </div>
+            </article>
+
+            <article className="stats-panel stats-topgames-panel">
+              <div className="stats-panel-head">
+                <strong>This Week</strong>
+                <button type="button" className="stats-panel-link" onClick={onOpenWeeklyPlaytime}>
+                  View all
+                </button>
+              </div>
+              <div className="stats-topgames-list">
+                {renderTopGameRows(weekTopGames, "week", {
+                  showEmptyPlaceholders: true,
+                  artwork: topGameArtwork,
+                  steamCapsuleMap,
+                })}
+              </div>
+            </article>
+          </section>
+        </>
+      )}
     </div>
   );
 }
 
-function StatsLineChart({ data, loading, mode, emptyLabel }) {
+function StatsLineChart({ data, mode, emptyLabel }) {
   const chartData = Array.isArray(data) ? data : [];
   const maxValue = Math.max(...chartData.map((item) => Number(item.value || 0)), 1);
   const axisTop = Math.max(10, Math.ceil(maxValue / 2) * 2);
@@ -532,7 +572,8 @@ function renderTopGameRows(items, keyPrefix, options = {}) {
   const artwork = options.artwork === "capsule" ? "capsule" : "poster";
   const steamCapsuleMap = options.steamCapsuleMap || {};
   const targetCount = artwork === "capsule" ? STATS_CAPSULE_TOP_GAMES_COUNT : STATS_POSTER_TOP_GAMES_COUNT;
-  const placeholders = Math.max(0, targetCount - rows.length);
+  const showPlaceholders = options.showEmptyPlaceholders !== false;
+  const placeholders = showPlaceholders ? Math.max(0, targetCount - rows.length) : 0;
 
   return (
     <>
@@ -576,7 +617,7 @@ function renderTopGameRows(items, keyPrefix, options = {}) {
   );
 }
 
-function StatsDonutChart({ items, totalSeconds, loading }) {
+function StatsDonutChart({ items, totalSeconds }) {
   const radius = 42;
   const circumference = 2 * Math.PI * radius;
   const normalizedItems = buildVisibleDonutSegments(items, totalSeconds, circumference);
@@ -633,9 +674,9 @@ function StatsDonutChart({ items, totalSeconds, loading }) {
 
     setHoverState((current) => (
       current &&
-      current.index === nextState.index &&
-      Math.abs(current.x - nextState.x) < 1 &&
-      Math.abs(current.y - nextState.y) < 1
+        current.index === nextState.index &&
+        Math.abs(current.x - nextState.x) < 1 &&
+        Math.abs(current.y - nextState.y) < 1
         ? current
         : nextState
     ));
@@ -700,8 +741,9 @@ function StatsDonutChart({ items, totalSeconds, loading }) {
   );
 }
 
-function StatsHeatmap({ data, loading }) {
-  const maxValue = Math.max(...data.flatMap((column) => column.values), 0);
+function StatsHeatmap({ data }) {
+  const heatmapData = Array.isArray(data) ? data : [];
+  const maxValue = Math.max(...heatmapData.flatMap((column) => column.values), 0);
   const [hoverState, setHoverState] = useState(null);
 
   return (
@@ -715,89 +757,90 @@ function StatsHeatmap({ data, loading }) {
         {Array.from({ length: 6 }, (_, rowIndex) => {
           const hour = rowIndex * 4;
           return (
-          <React.Fragment key={`hour-${hour}`}>
-            <span className="stats-heatmap-hour">
-              {HEATMAP_HOUR_LABELS.find((item) => item.hour === hour)?.label || ""}
-            </span>
-            {data.map((column) => {
-              const startSlot = rowIndex * 4;
-              const slotValues = [
-                column.values[startSlot] || 0,
-                column.values[startSlot + 1] || 0,
-                column.values[startSlot + 2] || 0,
-                column.values[startSlot + 3] || 0,
-              ];
-              return (
-                <div key={`${column.label}-${hour}`} className="stats-heatmap-day-pair">
-                  <button
-                    type="button"
-                    className="stats-heatmap-cell"
-                    style={{ "--heat": String(resolveHeatOpacity(slotValues[0], maxValue)) }}
-                    onPointerEnter={(event) => {
-                      const rect = event.currentTarget.getBoundingClientRect();
-                      const gridRect = event.currentTarget.closest(".stats-heatmap-grid")?.getBoundingClientRect();
-                      setHoverState({
-                        title: formatHeatmapSlotLabel(column.label, hour),
-                        value: formatDurationLong(slotValues[0]),
-                        x: gridRect ? rect.left - gridRect.left + rect.width / 2 : 0,
-                        y: gridRect ? rect.top - gridRect.top : 0,
-                      });
-                    }}
-                    onPointerLeave={() => setHoverState(null)}
-                  />
-                  <button
-                    type="button"
-                    className="stats-heatmap-cell"
-                    style={{ "--heat": String(resolveHeatOpacity(slotValues[1], maxValue)) }}
-                    onPointerEnter={(event) => {
-                      const rect = event.currentTarget.getBoundingClientRect();
-                      const gridRect = event.currentTarget.closest(".stats-heatmap-grid")?.getBoundingClientRect();
-                      setHoverState({
-                        title: formatHeatmapSlotLabel(column.label, hour + 1),
-                        value: formatDurationLong(slotValues[1]),
-                        x: gridRect ? rect.left - gridRect.left + rect.width / 2 : 0,
-                        y: gridRect ? rect.top - gridRect.top : 0,
-                      });
-                    }}
-                    onPointerLeave={() => setHoverState(null)}
-                  />
-                  <button
-                    type="button"
-                    className="stats-heatmap-cell"
-                    style={{ "--heat": String(resolveHeatOpacity(slotValues[2], maxValue)) }}
-                    onPointerEnter={(event) => {
-                      const rect = event.currentTarget.getBoundingClientRect();
-                      const gridRect = event.currentTarget.closest(".stats-heatmap-grid")?.getBoundingClientRect();
-                      setHoverState({
-                        title: formatHeatmapSlotLabel(column.label, hour + 2),
-                        value: formatDurationLong(slotValues[2]),
-                        x: gridRect ? rect.left - gridRect.left + rect.width / 2 : 0,
-                        y: gridRect ? rect.top - gridRect.top : 0,
-                      });
-                    }}
-                    onPointerLeave={() => setHoverState(null)}
-                  />
-                  <button
-                    type="button"
-                    className="stats-heatmap-cell"
-                    style={{ "--heat": String(resolveHeatOpacity(slotValues[3], maxValue)) }}
-                    onPointerEnter={(event) => {
-                      const rect = event.currentTarget.getBoundingClientRect();
-                      const gridRect = event.currentTarget.closest(".stats-heatmap-grid")?.getBoundingClientRect();
-                      setHoverState({
-                        title: formatHeatmapSlotLabel(column.label, hour + 3),
-                        value: formatDurationLong(slotValues[3]),
-                        x: gridRect ? rect.left - gridRect.left + rect.width / 2 : 0,
-                        y: gridRect ? rect.top - gridRect.top : 0,
-                      });
-                    }}
-                    onPointerLeave={() => setHoverState(null)}
-                  />
-                </div>
-              );
-            })}
-          </React.Fragment>
-        )})}
+            <React.Fragment key={`hour-${hour}`}>
+              <span className="stats-heatmap-hour">
+                {HEATMAP_HOUR_LABELS.find((item) => item.hour === hour)?.label || ""}
+              </span>
+              {data.map((column) => {
+                const startSlot = rowIndex * 4;
+                const slotValues = [
+                  column.values[startSlot] || 0,
+                  column.values[startSlot + 1] || 0,
+                  column.values[startSlot + 2] || 0,
+                  column.values[startSlot + 3] || 0,
+                ];
+                return (
+                  <div key={`${column.label}-${hour}`} className="stats-heatmap-day-pair">
+                    <button
+                      type="button"
+                      className="stats-heatmap-cell"
+                      style={{ "--heat": String(resolveHeatOpacity(slotValues[0], maxValue)) }}
+                      onPointerEnter={(event) => {
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        const gridRect = event.currentTarget.closest(".stats-heatmap-grid")?.getBoundingClientRect();
+                        setHoverState({
+                          title: formatHeatmapSlotLabel(column.label, hour),
+                          value: formatDurationLong(slotValues[0]),
+                          x: gridRect ? rect.left - gridRect.left + rect.width / 2 : 0,
+                          y: gridRect ? rect.top - gridRect.top : 0,
+                        });
+                      }}
+                      onPointerLeave={() => setHoverState(null)}
+                    />
+                    <button
+                      type="button"
+                      className="stats-heatmap-cell"
+                      style={{ "--heat": String(resolveHeatOpacity(slotValues[1], maxValue)) }}
+                      onPointerEnter={(event) => {
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        const gridRect = event.currentTarget.closest(".stats-heatmap-grid")?.getBoundingClientRect();
+                        setHoverState({
+                          title: formatHeatmapSlotLabel(column.label, hour + 1),
+                          value: formatDurationLong(slotValues[1]),
+                          x: gridRect ? rect.left - gridRect.left + rect.width / 2 : 0,
+                          y: gridRect ? rect.top - gridRect.top : 0,
+                        });
+                      }}
+                      onPointerLeave={() => setHoverState(null)}
+                    />
+                    <button
+                      type="button"
+                      className="stats-heatmap-cell"
+                      style={{ "--heat": String(resolveHeatOpacity(slotValues[2], maxValue)) }}
+                      onPointerEnter={(event) => {
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        const gridRect = event.currentTarget.closest(".stats-heatmap-grid")?.getBoundingClientRect();
+                        setHoverState({
+                          title: formatHeatmapSlotLabel(column.label, hour + 2),
+                          value: formatDurationLong(slotValues[2]),
+                          x: gridRect ? rect.left - gridRect.left + rect.width / 2 : 0,
+                          y: gridRect ? rect.top - gridRect.top : 0,
+                        });
+                      }}
+                      onPointerLeave={() => setHoverState(null)}
+                    />
+                    <button
+                      type="button"
+                      className="stats-heatmap-cell"
+                      style={{ "--heat": String(resolveHeatOpacity(slotValues[3], maxValue)) }}
+                      onPointerEnter={(event) => {
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        const gridRect = event.currentTarget.closest(".stats-heatmap-grid")?.getBoundingClientRect();
+                        setHoverState({
+                          title: formatHeatmapSlotLabel(column.label, hour + 3),
+                          value: formatDurationLong(slotValues[3]),
+                          x: gridRect ? rect.left - gridRect.left + rect.width / 2 : 0,
+                          y: gridRect ? rect.top - gridRect.top : 0,
+                        });
+                      }}
+                      onPointerLeave={() => setHoverState(null)}
+                    />
+                  </div>
+                );
+              })}
+            </React.Fragment>
+          )
+        })}
         {hoverState ? (
           <div
             className="stats-chart-tooltip stats-heatmap-tooltip"
@@ -1264,9 +1307,9 @@ function TopGameArtwork({ game, artwork = "poster", steamCapsuleUrl = "" }) {
   const normalizedArtwork = artwork === "capsule" ? "capsule" : "poster";
   const candidates = normalizedArtwork === "capsule"
     ? [
-        resolveGenericMedia(steamCapsuleUrl) ? { src: resolveGenericMedia(steamCapsuleUrl), kind: "capsule" } : null,
-        ...(Array.isArray(game?.capsuleCandidates) ? game.capsuleCandidates : []),
-      ].filter(Boolean)
+      resolveGenericMedia(steamCapsuleUrl) ? { src: resolveGenericMedia(steamCapsuleUrl), kind: "capsule" } : null,
+      ...(Array.isArray(game?.capsuleCandidates) ? game.capsuleCandidates : []),
+    ].filter(Boolean)
     : Array.isArray(game?.posterCandidates) ? game.posterCandidates : [];
   const [sourceIndex, setSourceIndex] = useState(0);
   const currentCandidate = candidates[sourceIndex] || null;

@@ -83,11 +83,14 @@ export default function Sidebar({ activeView, onNavigate }) {
           }}
           style={{ cursor: "default" }}
         >
-          <div className="h-9 w-9 rounded-xl bg-[#1e1e1e] flex items-center justify-center flex-shrink-0 shadow-md">
-            <img src={appLogo} alt="TylePlay logo" className="w-5 h-5 object-contain" />
-          </div>
+          <img
+            src={appLogo}
+            alt="TylePlay logo"
+            className="w-8 h-8 object-contain flex-shrink-0 select-none drop-shadow-sm"
+            draggable="false"
+          />
           <h1 className="text-xl font-black tracking-tight text-white whitespace-nowrap">
-            Tyle<span className="text-[#558467]">Play</span>
+            Tyle<span className="text-[#8d79ff]">Play</span>
           </h1>
         </div>
 

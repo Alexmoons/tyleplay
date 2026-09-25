@@ -138,6 +138,7 @@ export default function LibraryGameCard({
   const buttonRef = useRef(null);
 
   const isFavorite = Boolean(game?.isFavorite ?? game?.is_favorite);
+  const isPosterOnly = viewMode === "poster";
 
   if (viewMode === "list") {
     return (
@@ -159,7 +160,8 @@ export default function LibraryGameCard({
 
   return (
     <article ref={rootRef} className="relative group w-full bg-[#141414] rounded-xl overflow-hidden border-0 transition-all duration-300">
-      <div className="relative aspect-[2/3] overflow-hidden bg-[#1e1e1e] cursor-pointer"
+      <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-black cursor-pointer"
+        style={{ WebkitMaskImage: "-webkit-radial-gradient(white, black)", transform: "translateZ(0)" }}
         role="button"
         tabIndex={0}
         aria-label={`Open ${game.name} details`}
@@ -172,23 +174,36 @@ export default function LibraryGameCard({
         }}
       >
         {media ? (
-          <img 
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
-            src={media} 
-            alt={game.name} 
-            style={posterStyle} 
+          <img
+            className="w-full h-full object-cover rounded-xl group-hover:scale-105 transition-transform duration-500"
+            src={media}
+            alt={game.name}
+            style={posterStyle}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-3xl font-black text-white/20 uppercase tracking-tighter">
             {getInitials(game.name)}
           </div>
         )}
-        
+
         {/* Overlay Gradients */}
-        <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black/95 via-black/70 to-transparent opacity-100 pointer-events-none transition-opacity duration-300" />
-        
+        <div
+          className={`absolute -inset-x-1 -bottom-1 h-28 rounded-b-xl bg-gradient-to-t from-black/95 via-black/70 to-transparent pointer-events-none z-[2] transition-all duration-300 ease-out ${
+            isPosterOnly && !isMenuOpen
+              ? "opacity-0 translate-y-6 group-hover:opacity-100 group-hover:translate-y-0"
+              : "opacity-100 translate-y-0"
+          }`}
+          style={{ transform: "translateZ(0)" }}
+        />
+
         {/* Top Badges */}
-        <div className="absolute top-2 w-full px-2 flex justify-between items-start z-10">
+        <div
+          className={`absolute top-2 w-full px-2 flex justify-between items-start z-10 transition-transform duration-300 ease-out ${
+            isPosterOnly && !isMenuOpen
+              ? "-translate-y-16 pointer-events-none group-hover:translate-y-0 group-hover:pointer-events-auto"
+              : "translate-y-0"
+          }`}
+        >
           {storeBadgeLabel ? (
             <div className="flex items-center gap-1.5">
               <span className="bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-1.5 py-0.5 rounded border border-white/10 shadow-sm">
@@ -209,11 +224,10 @@ export default function LibraryGameCard({
 
             <button
               type="button"
-              className={`p-1.5 rounded-full backdrop-blur-md border border-white/10 transition-all cursor-pointer ${
-                isFavorite 
-                  ? "bg-[#7068ff]/90 text-white" 
-                  : "bg-black/40 text-white/70 hover:bg-black/70 hover:text-white"
-              }`}
+              className={`p-1.5 rounded-full backdrop-blur-md border border-white/10 shadow-[0_2px_8px_rgba(0,0,0,0.4)] transition-all duration-150 cursor-pointer hover:scale-[1.08] hover:brightness-[1.2] ${isFavorite
+                ? "bg-[#7068ff]/90 text-white"
+                : "bg-black/40 text-white/70 hover:bg-black/70 hover:text-white"
+                }`}
               onClick={(event) => {
                 event.stopPropagation();
                 event.preventDefault();
@@ -225,9 +239,15 @@ export default function LibraryGameCard({
             </button>
           </div>
         </div>
-        
+
         {/* Bottom Content within Image */}
-        <div className="absolute bottom-0 w-full px-3.5 pt-3 pb-3.5 transform translate-y-0.5 group-hover:translate-y-0 transition-transform duration-300">
+        <div
+          className={`absolute bottom-0 w-full px-3.5 pt-3 pb-3.5 z-10 transition-all duration-300 ease-out ${
+            isPosterOnly && !isMenuOpen
+              ? "opacity-0 translate-y-6 pointer-events-none group-hover:opacity-100 group-hover:translate-y-0 group-hover:pointer-events-auto"
+              : "opacity-100 transform translate-y-0.5 group-hover:translate-y-0"
+          }`}
+        >
           <h3 className="font-bold text-sm text-white leading-tight mb-0.5 line-clamp-2 drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]">
             {game.name}
           </h3>
@@ -609,35 +629,35 @@ function CardStatusDropdown({ gameId, currentStatus, hasPlaytime, onUpdateStatus
 
       {isOpen && coords && typeof document !== "undefined"
         ? createPortal(
-            <div
-              ref={panelRef}
-              className="card-status-dropdown-panel is-portal fixed z-[99999] pointer-events-auto"
-              style={{
-                left: `${coords.left}px`,
-                top: `${coords.top}px`,
-              }}
-              onClick={(event) => {
-                event.stopPropagation();
-              }}
-            >
-              {options.map((option) => {
-                const isSelected = option === currentStatus;
-                return (
-                  <button
-                    key={option}
-                    type="button"
-                    data-status={option}
-                    className={`card-status-dropdown-item${isSelected ? " is-selected" : ""}`}
-                    onClick={(event) => handleSelect(event, option)}
-                  >
-                    <StatusIcon status={option} className="w-3.2 h-3.2 shrink-0" />
-                    <span>{option}</span>
-                  </button>
-                );
-              })}
-            </div>,
-            document.body
-          )
+          <div
+            ref={panelRef}
+            className="card-status-dropdown-panel is-portal fixed z-[99999] pointer-events-auto"
+            style={{
+              left: `${coords.left}px`,
+              top: `${coords.top}px`,
+            }}
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            {options.map((option) => {
+              const isSelected = option === currentStatus;
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  data-status={option}
+                  className={`card-status-dropdown-item${isSelected ? " is-selected" : ""}`}
+                  onClick={(event) => handleSelect(event, option)}
+                >
+                  <StatusIcon status={option} className="w-3.2 h-3.2 shrink-0" />
+                  <span>{option}</span>
+                </button>
+              );
+            })}
+          </div>,
+          document.body
+        )
         : null}
     </div>
   );

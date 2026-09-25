@@ -193,13 +193,19 @@ function getSessionBadgeClass(count) {
 export default function DailyPlaytimeDetailPage({
   library,
   loading: parentLoading = false,
+  initialStatsSnapshot = null,
+  onStatsSnapshotLoaded = null,
   onBack,
   onOpenTable,
   topGameArtwork = "poster",
   onNotify,
 }) {
-  const [statsSnapshot, setStatsSnapshot] = useState({ games: [] });
-  const [loadingSnapshot, setLoadingSnapshot] = useState(true);
+  const [statsSnapshot, setStatsSnapshot] = useState(() => (
+    initialStatsSnapshot && typeof initialStatsSnapshot === "object"
+      ? { games: Array.isArray(initialStatsSnapshot.games) ? initialStatsSnapshot.games : [] }
+      : { games: [] }
+  ));
+  const [loadingSnapshot, setLoadingSnapshot] = useState(() => !Array.isArray(initialStatsSnapshot?.games) || !initialStatsSnapshot.games.length);
   const [sortBy, setSortBy] = useState("playtime-desc");
   const [page, setPage] = useState(1);
   const [steamCapsuleMap, setSteamCapsuleMap] = useState(() => ({ ...steamCapsuleCache }));
@@ -214,15 +220,23 @@ export default function DailyPlaytimeDetailPage({
   const activeSortLabel = sortOptions.find((option) => option.value === sortBy)?.label || "Playtime: Highest First";
 
   useEffect(() => {
+    if (initialStatsSnapshot && typeof initialStatsSnapshot === "object" && Array.isArray(initialStatsSnapshot.games)) {
+      setStatsSnapshot({ games: initialStatsSnapshot.games });
+    }
+  }, [initialStatsSnapshot]);
+
+  useEffect(() => {
     let cancelled = false;
     async function fetchStatsSnapshot() {
       setLoadingSnapshot(true);
       try {
         const result = await invoke("get_stats_snapshot");
         if (cancelled) return;
-        setStatsSnapshot({
+        const snapshotData = {
           games: Array.isArray(result?.games) ? result.games : [],
-        });
+        };
+        setStatsSnapshot(snapshotData);
+        onStatsSnapshotLoaded?.(snapshotData);
       } catch (err) {
         if (!cancelled) {
           setStatsSnapshot({ games: [] });
@@ -287,17 +301,22 @@ export default function DailyPlaytimeDetailPage({
     setPage(1);
   }, [sortBy]);
 
+  const visibleSteamAppIdsKey = useMemo(() => {
+    return visibleGames
+      .map((game) => extractSteamAppId(game.steam_appid, game.steam_header_url, game.backdrop_url, game.cover_url))
+      .filter((id) => id > 0)
+      .sort((a, b) => a - b)
+      .join(",");
+  }, [visibleGames]);
+
   useEffect(() => {
-    if (topGameArtwork !== "capsule") {
+    if (topGameArtwork !== "capsule" || !visibleSteamAppIdsKey) {
       setCapsulesLoading(false);
       return undefined;
     }
 
-    const appIds = visibleGames
-      .map((game) => extractSteamAppId(game.steam_appid, game.steam_header_url, game.backdrop_url, game.cover_url))
-      .filter((id) => id > 0);
-
-    const missingAppIds = [...new Set(appIds)].filter((id) => !steamCapsuleMap[id]);
+    const appIds = visibleSteamAppIdsKey.split(",").map(Number).filter((id) => id > 0);
+    const missingAppIds = [...new Set(appIds)].filter((id) => !(id in steamCapsuleCache));
 
     if (!missingAppIds.length) {
       setCapsulesLoading(false);
@@ -310,10 +329,19 @@ export default function DailyPlaytimeDetailPage({
     async function loadSteamCapsules() {
       try {
         const response = await invoke("get_steam_small_capsules", { appIds: missingAppIds });
-        if (cancelled || !response || typeof response !== "object") return;
-        Object.assign(steamCapsuleCache, response);
-        setSteamCapsuleMap((curr) => ({ ...curr, ...response }));
+        const resolved = {};
+        missingAppIds.forEach((id) => {
+          const url = (response && typeof response === "object" && response[id]) ? response[id] : "";
+          steamCapsuleCache[id] = url;
+          resolved[id] = url;
+        });
+
+        if (cancelled) return;
+        setSteamCapsuleMap((curr) => ({ ...curr, ...resolved }));
       } catch {
+        missingAppIds.forEach((id) => {
+          steamCapsuleCache[id] = "";
+        });
       } finally {
         if (!cancelled) setCapsulesLoading(false);
       }
@@ -323,9 +351,9 @@ export default function DailyPlaytimeDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [topGameArtwork, visibleGames, steamCapsuleMap]);
+  }, [topGameArtwork, visibleSteamAppIdsKey]);
 
-  const isPageLoading = parentLoading || loadingSnapshot || (topGameArtwork === "capsule" && capsulesLoading);
+  const isPageLoading = parentLoading || loadingSnapshot;
   const todayDateLabel = useMemo(() => formatTodayDateLabel(), []);
 
   return (

@@ -9,6 +9,7 @@ import {
 import SummaryCard from "../components/SummaryCard";
 import LibraryCardSkeleton from "../components/LibraryCardSkeleton";
 import LibraryGameCard from "../components/LibraryGameCard";
+import LoadingIndicator from "../components/LoadingIndicator";
 import {
   ChevronDownIcon,
   ChevronLeftIcon,
@@ -58,7 +59,7 @@ export default function LibraryPage({
     { value: "release_year", label: "Release Year" },
   ];
   const activeSortLabel = sortOptions.find((option) => option.value === sortBy)?.label || "Last Played";
-  const visibleViewModes = viewModes.slice(1);
+  const visibleViewModes = viewModes;
   const paginationItems = buildPaginationItems(currentPage, totalPages);
 
   return (
@@ -148,71 +149,77 @@ export default function LibraryPage({
         </div>
       </div>
 
-      <div className={`library-grid view-${viewMode}`}>
-        {loading
-          ? Array.from({ length: PAGE_SIZE }, (_, index) => <LibraryCardSkeleton key={`skeleton-${index}`} viewMode={viewMode} />)
-          : visibleGames.map((game) => (
-            <LibraryGameCard
-              key={game.id}
-              game={game}
-              viewMode={viewMode}
-              steamHeaderUrl={game.steam_header_url || ""}
-              onOpen={() => onOpenGameDetail?.(game.id)}
-              onEdit={() => onOpenGameEdit?.(game.id)}
-              onDelete={() => onDeleteGame?.(game.id)}
-              onToggleFavorite={(isFavorite) => onToggleFavorite?.(game.id, isFavorite)}
-              onUpdateStatus={(gameId, status) => onUpdateStatus?.(gameId, status)}
-            />
+      {loading ? (
+        <div className="library-loading-wrapper">
+          <LoadingIndicator className="stats-loading-block" label="Loading library..." />
+        </div>
+      ) : (
+        <>
+          <div className={`library-grid view-${viewMode}`}>
+            {visibleGames.map((game) => (
+              <LibraryGameCard
+                key={game.id}
+                game={game}
+                viewMode={viewMode}
+                steamHeaderUrl={game.steam_header_url || ""}
+                onOpen={() => onOpenGameDetail?.(game.id)}
+                onEdit={() => onOpenGameEdit?.(game.id)}
+                onDelete={() => onDeleteGame?.(game.id)}
+                onToggleFavorite={(isFavorite) => onToggleFavorite?.(game.id, isFavorite)}
+                onUpdateStatus={(gameId, status) => onUpdateStatus?.(gameId, status)}
+              />
             ))}
-      </div>
+          </div>
 
-      {!loading && !visibleGames.length ? (
-        <div className="library-empty">
-          <strong>No games found.</strong>
-          <span>Try another search or category.</span>
-        </div>
-      ) : null}
+          {!visibleGames.length ? (
+            <div className="library-empty">
+              <strong>No games found.</strong>
+              <span>Try another search or category.</span>
+            </div>
+          ) : null}
 
-      <footer className="library-footer">
-        <span>{buildRangeLabel(filteredLibrary.length, currentPage, PAGE_SIZE)} of {filteredLibrary.length} games</span>
-        <div className="pager" role="navigation" aria-label="Pagination">
-          <button
-            type="button"
-            aria-label="Previous page"
-            disabled={currentPage <= 1}
-            onMouseDown={preventPagerFocus}
-            onClick={() => setPage((value) => Math.max(1, value - 1))}
-          >
-            <ChevronLeftIcon />
-          </button>
-          {paginationItems.map((item) => (
-            item.type === "ellipsis" ? (
-              <span key={`page-${item.key}`} className="pager-ellipsis" aria-hidden="true">...</span>
-            ) : (
+          <footer className="library-footer">
+            <span>{buildRangeLabel(filteredLibrary.length, currentPage, PAGE_SIZE)} of {filteredLibrary.length} games</span>
+            <div className="pager" role="navigation" aria-label="Pagination">
               <button
-                key={`page-${item.value}`}
                 type="button"
-                className={currentPage === item.value ? "is-active" : ""}
-                aria-label={`Page ${item.value}`}
-                aria-pressed={currentPage === item.value}
+                aria-label="Previous page"
+                disabled={currentPage <= 1}
                 onMouseDown={preventPagerFocus}
-                onClick={() => setPage(item.value)}
+                onClick={() => setPage((value) => Math.max(1, value - 1))}
               >
-                {item.value}
+                <ChevronLeftIcon />
               </button>
-            )
-          ))}
-          <button
-            type="button"
-            aria-label="Next page"
-            disabled={currentPage >= totalPages}
-            onMouseDown={preventPagerFocus}
-            onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
-          >
-            <ChevronRightIcon />
-          </button>
-        </div>
-      </footer>
+              {paginationItems.map((item) => (
+                item.type === "ellipsis" ? (
+                  <span key={`page-${item.key}`} className="pager-ellipsis" aria-hidden="true">...</span>
+                ) : (
+                  <button
+                    key={`page-${item.value}`}
+                    type="button"
+                    className={currentPage === item.value ? "is-active" : ""}
+                    aria-label={`Page ${item.value}`}
+                    aria-pressed={currentPage === item.value}
+                    onMouseDown={preventPagerFocus}
+                    onClick={() => setPage(item.value)}
+                  >
+                    {item.value}
+                  </button>
+                )
+              ))}
+              <button
+                type="button"
+                aria-label="Next page"
+                disabled={currentPage >= totalPages}
+                onMouseDown={preventPagerFocus}
+                onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+              >
+                <ChevronRightIcon />
+              </button>
+            </div>
+          </footer>
+        </>
+      )}
     </>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   buildBackdropPresentationStyle,
   buildBackdropStyle,
@@ -210,8 +210,8 @@ export default function DashboardPage({
   const hoveredChartItem = chartValues.find((item) => item.key === hoveredChartItemKey) || null;
   const todaySeconds = Number(dashboard?.today_seconds || 0);
   const weekSeconds = Number(dashboard?.week_seconds || 0);
-  const todayLabel = showPlaytimeTimeLabels ? formatTodayPanelDateLabel() : "Playtime Today";
-  const weekLabel = showPlaytimeTimeLabels ? formatCurrentWeekRangeLabel() : "Playtime This Week";
+  const todayLabel = showPlaytimeTimeLabels ? formatTodayPanelDateLabel() : "Today";
+  const weekLabel = showPlaytimeTimeLabels ? formatCurrentWeekRangeLabel() : "This Week";
   const yesterdaySeconds = Number(dailyOverview[1]?.total_seconds || 0);
   const previousWeekSeconds = getPreviousWeekTotalSeconds(dailyOverview);
   const topGamesLimit = topGameArtwork === "poster" ? POSTER_TOP_GAMES_COUNT : CAPSULE_TOP_GAMES_COUNT;
@@ -272,11 +272,20 @@ export default function DashboardPage({
   const notificationItems = Array.isArray(notifications) ? notifications.slice(0, DASHBOARD_NOTIFICATION_LIMIT) : [];
   const notificationCount = Number(unreadNotificationCount || 0);
 
-  useEffect(() => {
+  const weeklyGamesSteamAppIdsKey = useMemo(() => {
     const appIds = weeklyGames
       .map((game) => Number(game.steamAppId || 0))
       .filter((appid) => appid > 0);
-    const missingAppIds = appIds.filter((appid) => !steamCapsuleMap[appid]);
+    return [...new Set(appIds)].sort((a, b) => a - b).join(",");
+  }, [weeklyGames]);
+
+  useEffect(() => {
+    if (!weeklyGamesSteamAppIdsKey) {
+      return undefined;
+    }
+
+    const appIds = weeklyGamesSteamAppIdsKey.split(",").map(Number).filter((id) => id > 0);
+    const missingAppIds = [...new Set(appIds)].filter((appid) => !(appid in steamCapsuleCache));
 
     if (!missingAppIds.length) {
       return undefined;
@@ -287,23 +296,30 @@ export default function DashboardPage({
     async function loadSteamCapsules() {
       try {
         const response = await invoke("get_steam_small_capsules", { appIds: missingAppIds });
-        if (cancelled || !response || typeof response !== "object") {
-          return;
-        }
+        const resolved = {};
+        missingAppIds.forEach((id) => {
+          const url = (response && typeof response === "object" && response[id]) ? response[id] : "";
+          steamCapsuleCache[id] = url;
+          resolved[id] = url;
+        });
 
-        Object.assign(steamCapsuleCache, response);
+        if (cancelled) return;
         setSteamCapsuleMap((current) => ({
           ...current,
-          ...response,
+          ...resolved,
         }));
-      } catch { }
+      } catch {
+        missingAppIds.forEach((id) => {
+          steamCapsuleCache[id] = "";
+        });
+      }
     }
 
     loadSteamCapsules();
     return () => {
       cancelled = true;
     };
-  }, [steamCapsuleMap, weeklyGames]);
+  }, [weeklyGamesSteamAppIdsKey]);
 
   useEffect(() => {
     if (recentPageCount <= 1) {
@@ -697,7 +713,7 @@ export default function DashboardPage({
       <section className="dashboard-bottom-grid">
         <article className="dashboard-panel dashboard-chart-panel">
           <div className="dashboard-section-bar">
-            <strong>Playtime Overview</strong>
+            <strong>Overview</strong>
             <div className="dashboard-tabs">
               <button type="button" className={chartMode === "day" ? "is-active" : ""} onClick={() => setChartMode("day")}>Day</button>
               <button type="button" className={chartMode === "week" ? "is-active" : ""} onClick={() => setChartMode("week")}>Week</button>

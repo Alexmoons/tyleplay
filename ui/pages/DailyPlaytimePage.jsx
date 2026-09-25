@@ -11,7 +11,6 @@ export default function DailyPlaytimePage({ onBack, onNotify, initialOverview = 
   const [selectedDay, setSelectedDay] = useState(null);
   const [selectedYear, setSelectedYear] = useState("");
   const [openMonthKeys, setOpenMonthKeys] = useState([]);
-  const hasConsumedInitialOverviewRef = useRef(Array.isArray(initialOverview?.days));
 
   function notifyDaily(notice) {
     onNotify?.(notice);
@@ -80,14 +79,13 @@ export default function DailyPlaytimePage({ onBack, onNotify, initialOverview = 
   }
 
   useEffect(() => {
-    let cancelled = false;
-
-    if (hasConsumedInitialOverviewRef.current) {
-      hasConsumedInitialOverviewRef.current = false;
-      return () => {
-        cancelled = true;
-      };
+    if (Array.isArray(initialOverview?.days)) {
+      setDays(initialOverview.days);
     }
+  }, [initialOverview]);
+
+  useEffect(() => {
+    let cancelled = false;
 
     async function loadOverview() {
       setLoading(true);

@@ -11,7 +11,6 @@ export default function WeeklyPlaytimePage({ onBack, onNotify, initialOverview =
   const [selectedWeek, setSelectedWeek] = useState(null);
   const [selectedYear, setSelectedYear] = useState("");
   const [openMonthKeys, setOpenMonthKeys] = useState([]);
-  const hasConsumedInitialOverviewRef = useRef(Array.isArray(initialOverview?.weeks));
 
   function notifyWeekly(notice) {
     onNotify?.(notice);
@@ -80,14 +79,13 @@ export default function WeeklyPlaytimePage({ onBack, onNotify, initialOverview =
   }
 
   useEffect(() => {
-    let cancelled = false;
-
-    if (hasConsumedInitialOverviewRef.current) {
-      hasConsumedInitialOverviewRef.current = false;
-      return () => {
-        cancelled = true;
-      };
+    if (Array.isArray(initialOverview?.weeks)) {
+      setWeeks(initialOverview.weeks);
     }
+  }, [initialOverview]);
+
+  useEffect(() => {
+    let cancelled = false;
 
     async function loadOverview() {
       setLoading(true);

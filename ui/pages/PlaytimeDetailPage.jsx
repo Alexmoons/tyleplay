@@ -182,17 +182,22 @@ export default function PlaytimeDetailPage({ library, loading, onBack, topGameAr
     setPage((current) => Math.min(current, totalPages));
   }, [totalPages]);
 
+  const visibleSteamAppIdsKey = useMemo(() => {
+    return visibleGames
+      .map((game) => extractSteamAppId(game.steam_appid, game.steam_header_url, game.backdrop_url, game.cover_url))
+      .filter((id) => id > 0)
+      .sort((a, b) => a - b)
+      .join(",");
+  }, [visibleGames]);
+
   useEffect(() => {
-    if (topGameArtwork !== "capsule") {
+    if (topGameArtwork !== "capsule" || !visibleSteamAppIdsKey) {
       setCapsulesLoading(false);
       return undefined;
     }
 
-    const appIds = visibleGames
-      .map((game) => extractSteamAppId(game.steam_appid, game.steam_header_url, game.backdrop_url, game.cover_url))
-      .filter((id) => id > 0);
-
-    const missingAppIds = [...new Set(appIds)].filter((id) => !steamCapsuleMap[id]);
+    const appIds = visibleSteamAppIdsKey.split(",").map(Number).filter((id) => id > 0);
+    const missingAppIds = [...new Set(appIds)].filter((id) => !(id in steamCapsuleCache));
 
     if (!missingAppIds.length) {
       setCapsulesLoading(false);
@@ -205,16 +210,22 @@ export default function PlaytimeDetailPage({ library, loading, onBack, topGameAr
     async function loadSteamCapsules() {
       try {
         const response = await invoke("get_steam_small_capsules", { appIds: missingAppIds });
-        if (cancelled || !response || typeof response !== "object") {
-          return;
-        }
+        const resolved = {};
+        missingAppIds.forEach((id) => {
+          const url = (response && typeof response === "object" && response[id]) ? response[id] : "";
+          steamCapsuleCache[id] = url;
+          resolved[id] = url;
+        });
 
-        Object.assign(steamCapsuleCache, response);
+        if (cancelled) return;
         setSteamCapsuleMap((current) => ({
           ...current,
-          ...response,
+          ...resolved,
         }));
       } catch {
+        missingAppIds.forEach((id) => {
+          steamCapsuleCache[id] = "";
+        });
       } finally {
         if (!cancelled) {
           setCapsulesLoading(false);
@@ -226,9 +237,9 @@ export default function PlaytimeDetailPage({ library, loading, onBack, topGameAr
     return () => {
       cancelled = true;
     };
-  }, [topGameArtwork, visibleGames, steamCapsuleMap]);
+  }, [topGameArtwork, visibleSteamAppIdsKey]);
 
-  const isPageLoading = loading || (topGameArtwork === "capsule" && capsulesLoading);
+  const isPageLoading = loading;
 
   return (
     <div className="playtime-detail-page">

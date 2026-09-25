@@ -39,9 +39,7 @@ import WeeklyPlaytimePage from "./pages/WeeklyPlaytimePage";
 import WeeklyPlaytimeDetailPage from "./pages/WeeklyPlaytimeDetailPage";
 
 
-const REFRESH_INTERVAL_MS = 5000;
 const CONTENT_BASE_WIDTH = 1248;
-const LIVE_REFRESH_VIEWS = new Set(["dashboard", "notifications"]);
 const INITIAL_APP_BOOT_MIN_MS = 5000;
 const INITIAL_VIEW_LOADING_MIN_MS = 900;
 const DEFAULT_SECTION_LOCATIONS = {
@@ -192,6 +190,7 @@ function App() {
   const [initialBootLoading, setInitialBootLoading] = useState(true);
   const [bootMessage, setBootMessage] = useState("Preparing application...");
   const [startupData, setStartupData] = useState(() => createInitialStartupData());
+  const [currentStatsSnapshot, setCurrentStatsSnapshot] = useState(null);
   const [query, setQuery] = useState("");
   const [activeTab, setActiveTab] = useState("all");
   const [sortBy, setSortBy] = useState("last_played");
@@ -329,6 +328,8 @@ function App() {
   const [isResettingLibraryMetadata, setIsResettingLibraryMetadata] = useState(false);
   const [confirmState, setConfirmState] = useState(null);
   const [contextMenuState, setContextMenuState] = useState(null);
+  const contextMenuStateRef = useRef(contextMenuState);
+  contextMenuStateRef.current = contextMenuState;
   const [hasUnsavedUserSettings, setHasUnsavedUserSettings] = useState(false);
   const [viewRefreshNonce, setViewRefreshNonce] = useState(0);
   const contentScrollRef = useRef(null);
@@ -428,17 +429,25 @@ function App() {
   }
 
   async function refreshLibraryData() {
-    const [nextLibrary, nextDashboard, nextArchiveGames, nextNotifications] = await Promise.all([
-      invoke("list_games"),
-      invoke("get_dashboard"),
-      invoke("list_archived_games"),
-      invoke("get_notification_overview"),
-    ]);
-    setLibrary(Array.isArray(nextLibrary) ? nextLibrary : []);
-    setDashboard(nextDashboard && typeof nextDashboard === "object" ? nextDashboard : null);
-    setArchiveGames(Array.isArray(nextArchiveGames) ? nextArchiveGames : []);
-    setNotifications(Array.isArray(nextNotifications?.items) ? nextNotifications.items : []);
-    setUnreadNotificationCount(Number(nextNotifications?.unread_count || 0));
+    try {
+      const [nextLibrary, nextDashboard, nextArchiveGames, nextNotifications, nextStatsSnapshot] = await Promise.all([
+        invoke("list_games"),
+        invoke("get_dashboard"),
+        invoke("list_archived_games"),
+        invoke("get_notification_overview"),
+        invoke("get_stats_snapshot").catch(() => null),
+      ]);
+      setLibrary(Array.isArray(nextLibrary) ? nextLibrary : []);
+      setDashboard(nextDashboard && typeof nextDashboard === "object" ? nextDashboard : null);
+      setArchiveGames(Array.isArray(nextArchiveGames) ? nextArchiveGames : []);
+      setNotifications(Array.isArray(nextNotifications?.items) ? nextNotifications.items : []);
+      setUnreadNotificationCount(Number(nextNotifications?.unread_count || 0));
+      if (nextStatsSnapshot) {
+        setCurrentStatsSnapshot(nextStatsSnapshot);
+      }
+    } catch (err) {
+      console.warn("Failed to refresh library data", err);
+    }
   }
 
   function openStatsSubView(nextSubView) {
@@ -560,13 +569,16 @@ function App() {
           selectedGameDetailResult,
         ] = secondaryResults;
 
+        const initialStats = statsSnapshotResult.status === "fulfilled" ? statsSnapshotResult.value : null;
+        setCurrentStatsSnapshot(initialStats);
+
         setStartupData({
           dashboardDayOverview: dayOverviewResult.status === "fulfilled" ? dayOverviewResult.value : null,
           dashboardWeekOverview: weekOverviewResult.status === "fulfilled" ? weekOverviewResult.value : null,
           dashboardMonthOverview: monthOverviewResult.status === "fulfilled" ? monthOverviewResult.value : null,
           dailyPlaytimeOverview: dailyOverviewResult.status === "fulfilled" ? dailyOverviewResult.value : null,
           weeklyPlaytimeOverview: weeklyOverviewResult.status === "fulfilled" ? weeklyOverviewResult.value : null,
-          statsSnapshot: statsSnapshotResult.status === "fulfilled" ? statsSnapshotResult.value : null,
+          statsSnapshot: initialStats,
           igdbSettings: igdbSettingsResult.status === "fulfilled" ? igdbSettingsResult.value : null,
           systemInfo: systemInfoResult.status === "fulfilled" ? systemInfoResult.value : null,
           selectedGameDetail: selectedGameDetailResult.status === "fulfilled" ? selectedGameDetailResult.value : null,
@@ -682,8 +694,6 @@ function App() {
       };
     }
 
-    const shouldPoll = LIVE_REFRESH_VIEWS.has(activeView);
-
     async function load(showLoader = false) {
       const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
       try {
@@ -719,18 +729,9 @@ function App() {
     } else {
       load(!hasCompletedInitialViewLoadRef.current);
     }
-    if (!shouldPoll) {
-      return () => {
-        cancelled = true;
-      };
-    }
 
-    const intervalId = window.setInterval(() => {
-      load(false);
-    }, REFRESH_INTERVAL_MS);
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
     };
   }, [activeView, initialBootLoading]);
 
@@ -743,12 +744,15 @@ function App() {
   }, [appSettings.playtime_display_mode]);
 
   useEffect(() => {
-    let unlisten = null;
+    let unlistenTray = null;
+    let unlistenSession = null;
+    let unlistenGame = null;
+    let unlistenSessionUpdate = null;
     let cancelled = false;
 
-    async function attachTrayListener() {
+    async function attachListeners() {
       try {
-        unlisten = await listen("tray-open-game-detail", (event) => {
+        unlistenTray = await listen("tray-open-game-detail", (event) => {
           const gameId = Number(event?.payload);
           if (!Number.isFinite(gameId) || gameId <= 0) {
             return;
@@ -762,14 +766,56 @@ function App() {
           console.warn("Failed to attach tray listener", nextError);
         }
       }
+
+      try {
+        unlistenSession = await listen("game-session-event", (event) => {
+          const eventType = event?.payload?.event_type;
+          if (eventType === "ended" || eventType === "started") {
+            refreshLibraryData();
+          }
+        });
+      } catch (nextError) {
+        if (!cancelled) {
+          console.warn("Failed to attach game session listener", nextError);
+        }
+      }
+
+      try {
+        unlistenGame = await listen("game-updated", () => {
+          refreshLibraryData();
+        });
+      } catch (nextError) {
+        if (!cancelled) {
+          console.warn("Failed to attach game-updated listener", nextError);
+        }
+      }
+
+      try {
+        unlistenSessionUpdate = await listen("session-updated", () => {
+          refreshLibraryData();
+        });
+      } catch (nextError) {
+        if (!cancelled) {
+          console.warn("Failed to attach session-updated listener", nextError);
+        }
+      }
     }
 
-    attachTrayListener();
+    attachListeners();
 
     return () => {
       cancelled = true;
-      if (typeof unlisten === "function") {
-        unlisten();
+      if (typeof unlistenTray === "function") {
+        unlistenTray();
+      }
+      if (typeof unlistenSession === "function") {
+        unlistenSession();
+      }
+      if (typeof unlistenGame === "function") {
+        unlistenGame();
+      }
+      if (typeof unlistenSessionUpdate === "function") {
+        unlistenSessionUpdate();
       }
     };
   }, []);
@@ -876,7 +922,9 @@ function App() {
     }
 
     function handleScroll() {
-      setContextMenuState(null);
+      if (contextMenuStateRef.current) {
+        setContextMenuState(null);
+      }
     }
 
     document.addEventListener("contextmenu", handleContextMenu);
@@ -999,12 +1047,6 @@ function App() {
       setActiveTab("all");
     }
   }, [activeTab, libraryStoreTabs]);
-
-  useEffect(() => {
-    if (viewMode === "poster") {
-      setViewMode("compact");
-    }
-  }, [viewMode]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLibrary.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -1450,12 +1492,12 @@ function App() {
             activeView === "game-detail"
               ? detailOriginView
               : activeView === "dashboard-today-detail"
-                  ? "dashboard"
+                ? "dashboard"
                 : activeView === "dashboard-week-detail"
                   ? "dashboard"
-                : activeView === "notifications"
-                  ? "dashboard"
-                : activeView
+                  : activeView === "notifications"
+                    ? "dashboard"
+                    : activeView
           }
           onNavigate={navigateToView}
         />
@@ -1527,58 +1569,66 @@ function App() {
                 ) : null}
 
                 {activeView === "stats" ? (
-                  statsSubView === "playtime-detail" ? (
-                    <PlaytimeDetailPage
-                      library={enrichedLibrary}
-                      loading={loading}
-                      topGameArtwork={appSettings.top_game_artwork || "capsule"}
-                      onBack={closeStatsSubView}
-                    />
-                  ) : statsSubView === "daily-playtime-detail" ? (
-                    <DailyPlaytimeDetailPage
-                      library={enrichedLibrary}
-                      loading={loading}
-                      topGameArtwork={appSettings.top_game_artwork || "capsule"}
-                      onBack={closeStatsSubView}
-                      onOpenTable={() => setStatsSubView("daily-playtime-table")}
-                      onNotify={pushAppNotice}
-                    />
-                  ) : statsSubView === "daily-playtime-table" ? (
-                    <DailyPlaytimePage
-                      library={enrichedLibrary}
-                      initialOverview={startupData.dailyPlaytimeOverview}
-                      onBack={() => setStatsSubView("daily-playtime-detail")}
-                      onNotify={pushAppNotice}
-                    />
-                  ) : statsSubView === "weekly-playtime-detail" ? (
-                    <WeeklyPlaytimeDetailPage
-                      library={enrichedLibrary}
-                      loading={loading}
-                      topGameArtwork={appSettings.top_game_artwork || "capsule"}
-                      onBack={closeStatsSubView}
-                      onOpenTable={() => setStatsSubView("weekly-playtime-table")}
-                      onNotify={pushAppNotice}
-                    />
-                  ) : statsSubView === "weekly-playtime-table" ? (
-                    <WeeklyPlaytimePage
-                      library={enrichedLibrary}
-                      initialOverview={startupData.weeklyPlaytimeOverview}
-                      onBack={() => setStatsSubView("weekly-playtime-detail")}
-                      onNotify={pushAppNotice}
-                    />
-                  ) : (
-                    <StatsPage
-                      key={`stats-${viewRefreshNonce}`}
-                      library={enrichedLibrary}
-                      loading={loading}
-                      topGameArtwork={appSettings.top_game_artwork || "capsule"}
-                      initialStatsSnapshot={startupData.statsSnapshot}
-                      onNotify={pushAppNotice}
-                      onOpenPlaytimeDetail={() => openStatsSubView("playtime-detail")}
-                      onOpenDailyPlaytime={() => openStatsSubView("daily-playtime-detail")}
-                      onOpenWeeklyPlaytime={() => openStatsSubView("weekly-playtime-detail")}
-                    />
-                  )
+                  <>
+                    {statsSubView === "playtime-detail" ? (
+                      <PlaytimeDetailPage
+                        library={enrichedLibrary}
+                        loading={loading}
+                        topGameArtwork={appSettings.top_game_artwork || "capsule"}
+                        onBack={closeStatsSubView}
+                      />
+                    ) : statsSubView === "daily-playtime-detail" ? (
+                      <DailyPlaytimeDetailPage
+                        library={enrichedLibrary}
+                        loading={loading}
+                        topGameArtwork={appSettings.top_game_artwork || "capsule"}
+                        initialStatsSnapshot={currentStatsSnapshot || startupData.statsSnapshot}
+                        onStatsSnapshotLoaded={setCurrentStatsSnapshot}
+                        onBack={closeStatsSubView}
+                        onOpenTable={() => setStatsSubView("daily-playtime-table")}
+                        onNotify={pushAppNotice}
+                      />
+                    ) : statsSubView === "daily-playtime-table" ? (
+                      <DailyPlaytimePage
+                        library={enrichedLibrary}
+                        initialOverview={startupData.dailyPlaytimeOverview}
+                        onBack={() => setStatsSubView("daily-playtime-detail")}
+                        onNotify={pushAppNotice}
+                      />
+                    ) : statsSubView === "weekly-playtime-detail" ? (
+                      <WeeklyPlaytimeDetailPage
+                        library={enrichedLibrary}
+                        loading={loading}
+                        topGameArtwork={appSettings.top_game_artwork || "capsule"}
+                        initialStatsSnapshot={currentStatsSnapshot || startupData.statsSnapshot}
+                        onStatsSnapshotLoaded={setCurrentStatsSnapshot}
+                        onBack={closeStatsSubView}
+                        onOpenTable={() => setStatsSubView("weekly-playtime-table")}
+                        onNotify={pushAppNotice}
+                      />
+                    ) : statsSubView === "weekly-playtime-table" ? (
+                      <WeeklyPlaytimePage
+                        library={enrichedLibrary}
+                        initialOverview={startupData.weeklyPlaytimeOverview}
+                        onBack={() => setStatsSubView("weekly-playtime-detail")}
+                        onNotify={pushAppNotice}
+                      />
+                    ) : null}
+                    <div style={{ display: statsSubView ? "none" : "contents" }}>
+                      <StatsPage
+                        key={`stats-${viewRefreshNonce}`}
+                        library={enrichedLibrary}
+                        loading={loading}
+                        topGameArtwork={appSettings.top_game_artwork || "capsule"}
+                        initialStatsSnapshot={currentStatsSnapshot || startupData.statsSnapshot}
+                        onStatsSnapshotLoaded={setCurrentStatsSnapshot}
+                        onNotify={pushAppNotice}
+                        onOpenPlaytimeDetail={() => openStatsSubView("playtime-detail")}
+                        onOpenDailyPlaytime={() => openStatsSubView("daily-playtime-detail")}
+                        onOpenWeeklyPlaytime={() => openStatsSubView("weekly-playtime-detail")}
+                      />
+                    </div>
+                  </>
                 ) : null}
 
                 {activeView === "dashboard-today-detail" ? (
