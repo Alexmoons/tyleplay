@@ -78,6 +78,13 @@ Database Location: ```%APPDATA%\com.artyle.tyleplay```
 </table>
 
 ---
+**v2.3.9 (2026-09-25)**
+- [x] Migrated background polling to an event-driven reactive architecture,
+- [x] Added a Poster-Only view mode on the Library page.
+- [x] Fixed recent playtime disappearing on the Stats page and resolved the endless loading loop on the Weekly Playtime page.
+- [x] Fixed corner gaps on Library poster cards and balanced overlay gradient presentation.
+- [x] Improved UI/UX with centered spin loaders and cleaner section titles.
+
 **v2.3.8-7 (2026-08-30)**
 - [x] Added Emulator Support.
   - DuckStation, tested on v0.1-11752
