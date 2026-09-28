@@ -78,6 +78,10 @@ Database Location: ```%APPDATA%\com.artyle.tyleplay```
 </table>
 
 ---
+**v2.3.9-1 (2026-09-29)**
+- [x] Fixed running game detection, live playtime counter, and dashboard hover effect.
+- [x] Added Export to CSV on Game Playtime page.
+
 **v2.3.9 (2026-09-25)**
 - [x] Migrated background polling to an event-driven reactive architecture,
 - [x] Added a Poster-Only view mode on the Library page.
