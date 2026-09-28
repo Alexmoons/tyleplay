@@ -8,7 +8,7 @@ TylePlay is a desktop application for tracking gaming sessions. All application 
 
 Database Location: ```%APPDATA%\com.artyle.tyleplay```
 
-> Only supports tracking native PC game executable files (`.exe`). Game emulators and non-executable launchers are not supported yet.
+> Only supports tracking native PC game executable files (`.exe`), and support for several emulators.
 ---
  ## Screenshots
 <table>
