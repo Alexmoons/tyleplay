@@ -3979,6 +3979,8 @@ fn scan_once(state: &AppState, app: Option<&AppHandle>) -> Result<bool, String> 
                 let total_play_time = get_game_total_play_time_seconds(&conn, game_id);
                 let start_time_str = format_timestamp_short(now);
                 if let Some(app_handle) = app {
+                    let _ = app_handle.emit("session-updated", session_id);
+
                     if notif_mode == "app_only" || notif_mode == "both" {
                         let payload = GameSessionEventPayload {
                             event_type: "started".to_string(),
@@ -4032,6 +4034,8 @@ fn scan_once(state: &AppState, app: Option<&AppHandle>) -> Result<bool, String> 
                 let end_time_str = format_timestamp_short(now);
                 let duration_str = format_duration_short_str(duration);
                 if let Some(app_handle) = app {
+                    let _ = app_handle.emit("session-updated", active.session_id);
+
                     if notif_mode == "app_only" || notif_mode == "both" {
                         let payload = GameSessionEventPayload {
                             event_type: "ended".to_string(),

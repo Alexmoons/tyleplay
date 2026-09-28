@@ -77,6 +77,22 @@ export default function DashboardPage({
   const hasConsumedInitialChartRef = useRef(Array.isArray(initialChartModeOverview?.buckets));
   const activeGameIds = new Set(activeGames.map((game) => Number(game.game_id || 0)).filter(Boolean));
   const activeGameNames = new Set(activeGames.map((game) => String(game.name || "").trim().toLowerCase()).filter(Boolean));
+  const [liveTimestamp, setLiveTimestamp] = useState(() => Math.floor(Date.now() / 1000));
+
+  useEffect(() => {
+    if (!activeGames.length) {
+      return undefined;
+    }
+
+    setLiveTimestamp(Math.floor(Date.now() / 1000));
+    const intervalId = window.setInterval(() => {
+      setLiveTimestamp(Math.floor(Date.now() / 1000));
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [activeGames.length]);
 
   useEffect(() => {
     setActiveGameIndex((value) => {
@@ -182,6 +198,16 @@ export default function DashboardPage({
   }, [chartMode]);
 
   const activeGame = activeGames[activeGameIndex] || null;
+  const activeGameElapsedSeconds = useMemo(() => {
+    if (!activeGame) {
+      return 0;
+    }
+    const startedAt = Number(activeGame.started_at || 0);
+    if (startedAt > 0) {
+      return Math.max(0, liveTimestamp - startedAt);
+    }
+    return Math.max(0, Number(activeGame.elapsed_seconds || 0));
+  }, [activeGame, liveTimestamp]);
   const recentPlayedGames = [...(Array.isArray(library) ? library : [])]
     .filter((game) => {
       const gameId = Number(game.id || 0);
@@ -600,7 +626,7 @@ export default function DashboardPage({
                 {activeGame ? (
                   <div className="dashboard-running-hero-meta">
                     <span className="dashboard-running-hero-time">
-                      {formatActiveDuration(activeGame.elapsed_seconds || 0)}
+                      {formatActiveDuration(activeGameElapsedSeconds)}
                     </span>
                   </div>
                 ) : null}

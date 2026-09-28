@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "../lib/tauri";
-import { ArrowLeftIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from "../components/icons";
+import { ArrowLeftIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ExportIcon } from "../components/icons";
 import LoadingIndicator from "../components/LoadingIndicator";
 import {
   buildPaginationItems,
   buildPosterPresentationStyle,
   buildRangeLabel,
   extractSteamAppId,
+  formatDurationDetailed,
   formatDurationLong,
   getInitials,
   preventPagerFocus,
@@ -126,9 +127,10 @@ export function PlaytimeDetailSkeletonRow({ isCapsule = false }) {
 
 const PLAYTIME_DETAIL_PAGE_SIZE = 15;
 
-export default function PlaytimeDetailPage({ library, loading, onBack, topGameArtwork = "poster" }) {
+export default function PlaytimeDetailPage({ library, loading, onBack, topGameArtwork = "poster", onNotify }) {
   const [sortBy, setSortBy] = useState("name-asc");
   const [page, setPage] = useState(1);
+  const [exporting, setExporting] = useState(false);
   const [steamCapsuleMap, setSteamCapsuleMap] = useState(() => ({ ...steamCapsuleCache }));
   const [capsulesLoading, setCapsulesLoading] = useState(false);
   const sortOptions = [
@@ -239,6 +241,57 @@ export default function PlaytimeDetailPage({ library, loading, onBack, topGameAr
     };
   }, [topGameArtwork, visibleSteamAppIdsKey]);
 
+  async function handleExportCsv() {
+    if (!games.length) {
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const csvRows = [
+        ["Game", "Status", "Playtime", "Share (%)", "Playtime (Seconds)"].map(csvCell).join(","),
+      ];
+
+      games.forEach((game) => {
+        const totalSeconds = Math.max(0, Number(game.total_seconds || 0));
+        const isPlayed = totalSeconds > 0;
+        const share = totalPlaytimeSeconds > 0 ? (totalSeconds / totalPlaytimeSeconds) * 100 : 0;
+        csvRows.push([
+          csvCell(game.name || "Unknown Game"),
+          csvCell(isPlayed ? "Played" : "Not Played"),
+          csvCell(isPlayed ? formatDurationDetailed(totalSeconds) : "-"),
+          csvCell(isPlayed ? `${Math.round(share)}%` : "0%"),
+          csvCell(totalSeconds),
+        ].join(","));
+      });
+
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const fileName = `game-playtime-${todayStr}.csv`;
+      const savedPath = await invoke("export_game_sessions_csv", {
+        fileName,
+        content: csvRows.join("\n"),
+      });
+
+      if (savedPath && typeof onNotify === "function") {
+        onNotify({
+          tone: "success",
+          title: "Game playtime exported.",
+          message: `Saved to ${savedPath}`,
+        });
+      }
+    } catch (nextError) {
+      if (typeof onNotify === "function") {
+        onNotify({
+          tone: "error",
+          title: "Export Failed",
+          message: String(nextError?.message || nextError || "Unable to export game playtime."),
+        });
+      }
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const isPageLoading = loading;
 
   return (
@@ -248,7 +301,18 @@ export default function PlaytimeDetailPage({ library, loading, onBack, topGameAr
           <h1>Game Playtime</h1>
         </div>
 
-        <div className="stats-profile-pill" aria-hidden="true" />
+        <div className="daily-playtime-view-table-wrap">
+          <button
+            type="button"
+            className="playtime-detail-export-text-btn"
+            onClick={handleExportCsv}
+            disabled={exporting || loading || !games.length}
+            title="Export game playtime to CSV"
+          >
+            <ExportIcon />
+            <span>{exporting ? "Exporting..." : "Export CSV"}</span>
+          </button>
+        </div>
       </header>
 
       <section className="stats-section">
@@ -437,4 +501,12 @@ function compareText(left, right) {
 
 function compareNumber(left, right) {
   return Number(left || 0) - Number(right || 0);
+}
+
+function csvCell(value) {
+  const str = String(value ?? "");
+  if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
 }

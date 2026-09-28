@@ -428,26 +428,45 @@ function App() {
     setActiveView(String(nextLocation.activeView || "dashboard"));
   }
 
+  const refreshPromiseRef = useRef(null);
+  const pendingRefreshRef = useRef(false);
+
   async function refreshLibraryData() {
-    try {
-      const [nextLibrary, nextDashboard, nextArchiveGames, nextNotifications, nextStatsSnapshot] = await Promise.all([
-        invoke("list_games"),
-        invoke("get_dashboard"),
-        invoke("list_archived_games"),
-        invoke("get_notification_overview"),
-        invoke("get_stats_snapshot").catch(() => null),
-      ]);
-      setLibrary(Array.isArray(nextLibrary) ? nextLibrary : []);
-      setDashboard(nextDashboard && typeof nextDashboard === "object" ? nextDashboard : null);
-      setArchiveGames(Array.isArray(nextArchiveGames) ? nextArchiveGames : []);
-      setNotifications(Array.isArray(nextNotifications?.items) ? nextNotifications.items : []);
-      setUnreadNotificationCount(Number(nextNotifications?.unread_count || 0));
-      if (nextStatsSnapshot) {
-        setCurrentStatsSnapshot(nextStatsSnapshot);
-      }
-    } catch (err) {
-      console.warn("Failed to refresh library data", err);
+    if (refreshPromiseRef.current) {
+      pendingRefreshRef.current = true;
+      return refreshPromiseRef.current;
     }
+
+    const run = async () => {
+      try {
+        const [nextLibrary, nextDashboard, nextArchiveGames, nextNotifications, nextStatsSnapshot] = await Promise.all([
+          invoke("list_games"),
+          invoke("get_dashboard"),
+          invoke("list_archived_games"),
+          invoke("get_notification_overview"),
+          invoke("get_stats_snapshot").catch(() => null),
+        ]);
+        setLibrary(Array.isArray(nextLibrary) ? nextLibrary : []);
+        setDashboard(nextDashboard && typeof nextDashboard === "object" ? nextDashboard : null);
+        setArchiveGames(Array.isArray(nextArchiveGames) ? nextArchiveGames : []);
+        setNotifications(Array.isArray(nextNotifications?.items) ? nextNotifications.items : []);
+        setUnreadNotificationCount(Number(nextNotifications?.unread_count || 0));
+        if (nextStatsSnapshot) {
+          setCurrentStatsSnapshot(nextStatsSnapshot);
+        }
+      } catch (err) {
+        console.warn("Failed to refresh library data", err);
+      } finally {
+        refreshPromiseRef.current = null;
+        if (pendingRefreshRef.current) {
+          pendingRefreshRef.current = false;
+          refreshLibraryData();
+        }
+      }
+    };
+
+    refreshPromiseRef.current = run();
+    return refreshPromiseRef.current;
   }
 
   function openStatsSubView(nextSubView) {
@@ -1576,6 +1595,7 @@ function App() {
                         loading={loading}
                         topGameArtwork={appSettings.top_game_artwork || "capsule"}
                         onBack={closeStatsSubView}
+                        onNotify={pushAppNotice}
                       />
                     ) : statsSubView === "daily-playtime-detail" ? (
                       <DailyPlaytimeDetailPage
