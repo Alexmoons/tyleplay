@@ -5894,7 +5894,16 @@ fn add_game(
         }
     }
 
-    let norm_rom_path = rom_path.map(|p| normalize_exe_path(&p)).or_else(|| is_emulator.then_some(final_exe_path.clone()));
+    let norm_rom_path = rom_path
+        .map(|p| {
+            let disp = display_exe_path(&p);
+            if Path::new(&disp).exists() {
+                restore_windows_path_case(&disp)
+            } else {
+                disp
+            }
+        })
+        .or_else(|| is_emulator.then(|| exe_path_display.clone()));
 
     let emu_profile_name: Option<String> = if let Some(emu_id) = emulator_id {
         conn.query_row("SELECT name FROM emulator_profiles WHERE id = ?1", params![emu_id], |r| r.get(0)).optional().unwrap_or(None)
@@ -6789,9 +6798,22 @@ fn update_game_metadata(
         .filter(|year| (1970..=2100).contains(year));
     let now = now_ts();
 
+    let clean_rom_path = input
+        .rom_path
+        .as_deref()
+        .map(|p| {
+            let displayed = display_exe_path(p);
+            if Path::new(&displayed).exists() {
+                restore_windows_path_case(&displayed)
+            } else {
+                displayed
+            }
+        })
+        .filter(|p| !p.trim().is_empty());
+
     let conn = state.db.lock().map_err(|_| "database lock poisoned")?;
     if input.game_type.as_deref() == Some("emulator") {
-        if let Some(rom_p) = input.rom_path.as_deref() {
+        if let Some(rom_p) = clean_rom_path.as_deref() {
             let emu_name = input.emulator_id.and_then(|emu_id| {
                 conn.query_row("SELECT name FROM emulator_profiles WHERE id = ?1", params![emu_id], |r| r.get::<_, String>(0)).optional().unwrap_or(None)
             }).or_else(|| {
@@ -6831,9 +6853,21 @@ fn update_game_metadata(
         age_rating_json = ?23,
         completion_status = ?25,
         game_type = COALESCE(?26, game_type),
-        rom_path = COALESCE(?27, rom_path),
-        emulator_id = COALESCE(?28, emulator_id),
-        emulator_profile_name = COALESCE(?29, emulator_profile_name),
+        rom_path = CASE
+            WHEN ?26 = 'emulator' THEN ?27
+            WHEN ?26 = 'pc' THEN NULL
+            ELSE COALESCE(?27, rom_path)
+        END,
+        emulator_id = CASE
+            WHEN ?26 = 'emulator' THEN ?28
+            WHEN ?26 = 'pc' THEN NULL
+            ELSE COALESCE(?28, emulator_id)
+        END,
+        emulator_profile_name = CASE
+            WHEN ?26 = 'emulator' THEN ?29
+            WHEN ?26 = 'pc' THEN NULL
+            ELSE COALESCE(?29, emulator_profile_name)
+        END,
         metadata_locked = 1,
         updated_at = ?24
       WHERE id = ?1
@@ -6869,7 +6903,7 @@ fn update_game_metadata(
                 now,
                 completion_status,
                 input.game_type,
-                input.rom_path.as_deref().map(normalize_exe_path),
+                clean_rom_path,
                 input.emulator_id,
                 input.emulator_id.and_then(|emu_id| {
                     conn.query_row("SELECT name FROM emulator_profiles WHERE id = ?1", params![emu_id], |r| r.get::<_, String>(0)).optional().unwrap_or(None)
@@ -6882,21 +6916,28 @@ fn update_game_metadata(
         return Err("game not found".to_string());
     }
 
-    if let Some(rom_p) = input.rom_path.as_ref() {
-        let norm_rom = normalize_exe_path(rom_p);
-        let rom_name = Path::new(&norm_rom)
-            .file_name()
-            .and_then(|v| v.to_str())
-            .map(normalize_exe_name)
-            .unwrap_or_default();
-        let rows_affected = conn.execute(
-            "UPDATE executables SET exe_path = ?1, exe_name = ?2, exe_path_display = ?3, updated_at = ?4 WHERE game_id = ?5",
-            params![norm_rom, rom_name, display_exe_path(&norm_rom), now, input.game_id],
-        ).unwrap_or(0);
-        if rows_affected == 0 && !norm_rom.is_empty() {
+    if input.game_type.as_deref() == Some("emulator") {
+        if let Some(rom_p) = clean_rom_path.as_ref() {
+            let norm_rom = normalize_exe_path(rom_p);
+            let rom_name = Path::new(rom_p)
+                .file_name()
+                .and_then(|v| v.to_str())
+                .map(normalize_exe_name)
+                .unwrap_or_default();
+            let rows_affected = conn.execute(
+                "UPDATE executables SET exe_path = ?1, exe_name = ?2, exe_path_display = ?3, updated_at = ?4 WHERE game_id = ?5",
+                params![norm_rom, rom_name, rom_p, now, input.game_id],
+            ).unwrap_or(0);
+            if rows_affected == 0 && !norm_rom.is_empty() {
+                let _ = conn.execute(
+                    "INSERT INTO executables (game_id, exe_name, exe_path, exe_path_display, status, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'tracked', ?5, ?5)",
+                    params![input.game_id, rom_name, norm_rom, rom_p, now],
+                );
+            }
+        } else {
             let _ = conn.execute(
-                "INSERT INTO executables (game_id, exe_name, exe_path, exe_path_display, status, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'tracked', ?5, ?5)",
-                params![input.game_id, rom_name, norm_rom, display_exe_path(&norm_rom), now],
+                "DELETE FROM executables WHERE game_id = ?1",
+                params![input.game_id],
             );
         }
     }
@@ -7005,7 +7046,37 @@ fn update_game_executable(
     let exe_path_display = display_exe_path(&input.exe_path);
     let exe_path = normalize_exe_path(&input.exe_path);
     if exe_path.is_empty() {
-        return Err("exe path is required".to_string());
+        let mut conn = state.db.lock().map_err(|_| "database lock poisoned")?;
+        let tx = conn.transaction().map_err(|err| err.to_string())?;
+
+        let game_exists: bool = tx
+            .query_row(
+                "SELECT 1 FROM games WHERE id = ?1",
+                params![input.game_id],
+                |_| Ok(true),
+            )
+            .optional()
+            .map_err(|err| err.to_string())?
+            .unwrap_or(false);
+
+        if !game_exists {
+            return Err("game not found".to_string());
+        }
+
+        tx.execute(
+            "DELETE FROM executables WHERE game_id = ?1",
+            params![input.game_id],
+        )
+        .map_err(|err| err.to_string())?;
+
+        tx.execute(
+            "UPDATE games SET rom_path = NULL WHERE id = ?1 AND game_type = 'pc'",
+            params![input.game_id],
+        )
+        .map_err(|err| err.to_string())?;
+
+        tx.commit().map_err(|err| err.to_string())?;
+        return Ok(());
     }
 
     let extension = Path::new(&exe_path)

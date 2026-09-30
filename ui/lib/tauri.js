@@ -1293,6 +1293,8 @@ export async function invoke(command, args) {
     const libraryGame = findMockLibraryGame(gameId);
     if (libraryGame) {
       libraryGame.executable_count = detail.executable_count;
+      libraryGame.executable_path = detail.executable_path;
+      libraryGame.executable_name = detail.executable_name;
     }
     return null;
   }
@@ -1336,14 +1338,24 @@ export async function invoke(command, args) {
       completion_status: resolvedStatus,
       metadata_locked: true,
       game_type: input.gameType || detail.game_type || "pc",
-      rom_path: input.romPath !== undefined ? input.romPath : (detail.rom_path || null),
+      rom_path: input.gameType === "emulator"
+        ? (input.romPath ? String(input.romPath).trim() : null)
+        : null,
       emulator_id: input.emulatorId !== undefined ? input.emulatorId : (detail.emulator_id || null),
       has_igdb_link: Boolean(detail.has_igdb_link),
       total_seconds: detail.total_seconds || libraryGame?.total_seconds || 0,
       playtime_adjustment_seconds: detail.playtime_adjustment_seconds || 0,
       has_manual_playtime: Boolean(detail.has_manual_playtime),
       last_played: detail.last_played || libraryGame?.last_played || null,
-      executable_count: detail.executable_count || libraryGame?.executable_count || 0,
+      executable_count: input.gameType === "emulator"
+        ? (input.romPath ? 1 : 0)
+        : (detail.executable_count || libraryGame?.executable_count || 0),
+      executable_path: input.gameType === "emulator"
+        ? (input.romPath ? String(input.romPath).trim() : null)
+        : detail.executable_path,
+      executable_name: input.gameType === "emulator"
+        ? (input.romPath ? String(input.romPath).trim().split(/[/\\]/).pop() || null : null)
+        : detail.executable_name,
       play_sessions: Array.isArray(detail.play_sessions) ? detail.play_sessions : [],
     });
 
@@ -1366,6 +1378,11 @@ export async function invoke(command, args) {
         title_logo_position_y: input.titleLogoPositionY ?? 50,
         title_logo_zoom: input.titleLogoZoom ?? 100,
         release_year: input.releaseYear || null,
+        game_type: detail.game_type,
+        rom_path: detail.rom_path,
+        executable_path: detail.executable_path,
+        executable_name: detail.executable_name,
+        executable_count: detail.executable_count,
       });
     }
 
