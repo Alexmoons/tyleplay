@@ -78,6 +78,9 @@ Database Location: ```%APPDATA%\com.artyle.tyleplay```
 </table>
 
 ---
+**v2.3.9-2 (2026-09-30)**
+- [x] Fixed clearing executable and ROM paths in game editor and preserve ROM casing.
+
 **v2.3.9-1 (2026-09-29)**
 - [x] Fixed running game detection, live playtime counter, and dashboard hover effect.
 - [x] Added Export to CSV on Game Playtime page.
